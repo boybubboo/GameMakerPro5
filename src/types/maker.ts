@@ -2321,6 +2321,8 @@ export interface SavePresetsFileBundle {
 
 export type CharacterBodyPartKey =
   | 'head'
+  | 'headCrown'
+  | 'headJaw'
   | 'neck'
   | 'torso'
   | 'belly'
@@ -2350,6 +2352,15 @@ export interface CharacterLimbProfile {
   squashZ?: number;
   /** Region color (smoothly blended across clay joints) */
   color: string;
+}
+
+export interface CharacterHeadSegmentProfile extends CharacterLimbProfile {
+  /** Vertical offset relative to skull anchor (m) */
+  offsetY: number;
+  /** Forward/back offset relative to skull anchor (m) */
+  offsetZ: number;
+  /** Smooth-min clay blend tightness multiplier (0.15..1.0) */
+  blendScale: number;
 }
 
 export type CharacterMuzzlePresetId =
@@ -2663,6 +2674,10 @@ export interface CharacterMakerDoc {
 
   /** Core and limb radial circumference + curvature profiles */
   head: CharacterLimbProfile;
+  /** Upper cranium / forehead / brow sculpt segment */
+  headCrown?: CharacterHeadSegmentProfile;
+  /** Lower jaw / chin / jowl sculpt segment */
+  headJaw?: CharacterHeadSegmentProfile;
   neck: CharacterLimbProfile;
   torso: CharacterLimbProfile;
   belly: CharacterLimbProfile;

@@ -35,6 +35,8 @@ import {
   createCharacterPresetDoc,
   createDefaultAddonConfig,
   createDefaultCharacterDoc,
+  createDefaultHeadCrown,
+  createDefaultHeadJaw,
   createDefaultSpikesConfig,
   createDefaultSurfaceCoat,
   createMuzzlePreset,
@@ -43,6 +45,12 @@ import {
   resolveCharacterExtras,
   type BuiltCharacterAsset,
 } from '../../three/characterMakerBuilder';
+import {
+  hasSavedCharacterSpeciesDefault,
+  resetCharacterSpeciesDefault,
+  saveCharacterSpeciesDefault,
+  useDefaultCharacterPresetsVersion,
+} from '../../utils/defaultCharacterPresets';
 import { createMakerRenderer, detectSoftwareGl, disposeObject3D, setupSceneEnvironment } from '../../three/islandScene';
 import { createDefaultRigSettings, inspectModelSkeleton, ProceduralRigController } from '../../three/proceduralRigAnimator';
 import { isWebGPUFallbackAdapter } from '../../three/webglUtils';
@@ -68,6 +76,7 @@ import type {
   CharacterHairStyle,
   CharacterHandStyle,
   CharacterHeadGearStyle,
+  CharacterHeadSegmentProfile,
   CharacterHornStyle,
   CharacterLimbProfile,
   CharacterMakerDoc,
@@ -104,7 +113,9 @@ type PreviewAnimMode = 'rest' | CustomClipSlot;
 type CameraPreset = 'fullBody' | 'face' | 'side' | 'back';
 
 const BODY_PART_ITEMS: { key: CharacterBodyPartKey; label: string; group: string }[] = [
-  { key: 'head', label: 'Head', group: 'Core' },
+  { key: 'head', label: 'Head (Main Skull)', group: 'Core' },
+  { key: 'headCrown', label: 'Head Crown / Brow', group: 'Core' },
+  { key: 'headJaw', label: 'Head Jaw / Chin', group: 'Core' },
   { key: 'muzzle', label: 'Muzzle (5-Seg)', group: 'Core' },
   { key: 'neck', label: 'Neck', group: 'Core' },
   { key: 'torso', label: 'Chest / Torso', group: 'Core' },
@@ -369,6 +380,8 @@ function isOpenMouthStyle(style: CharacterMouthStyle): boolean {
 function getLimbProfile(doc: CharacterMakerDoc, key: CharacterBodyPartKey): CharacterLimbProfile {
   switch (key) {
     case 'head': return doc.head;
+    case 'headCrown': return doc.headCrown ?? createDefaultHeadCrown(doc.head);
+    case 'headJaw': return doc.headJaw ?? createDefaultHeadJaw(doc.head);
     case 'neck': return doc.neck;
     case 'torso': return doc.torso;
     case 'belly': return doc.belly;
@@ -401,6 +414,16 @@ function setLimbProfile(
 ): CharacterMakerDoc {
   switch (key) {
     case 'head': return { ...doc, head: updater(doc.head) };
+    case 'headCrown': {
+      const cur = doc.headCrown ?? createDefaultHeadCrown(doc.head);
+      const next = updater(cur);
+      return { ...doc, headCrown: { ...cur, ...next } };
+    }
+    case 'headJaw': {
+      const cur = doc.headJaw ?? createDefaultHeadJaw(doc.head);
+      const next = updater(cur);
+      return { ...doc, headJaw: { ...cur, ...next } };
+    }
     case 'neck': return { ...doc, neck: updater(doc.neck) };
     case 'torso': return { ...doc, torso: updater(doc.torso) };
     case 'belly': return { ...doc, belly: updater(doc.belly) };
@@ -414,6 +437,19 @@ function setLimbProfile(
     case 'extraArm': return { ...doc, extraArmProfile: updater(doc.extraArmProfile) };
     case 'extraLeg': return { ...doc, extraLegProfile: updater(doc.extraLegProfile) };
   }
+}
+
+function updateHeadSegment(
+  doc: CharacterMakerDoc,
+  key: 'headCrown' | 'headJaw',
+  patch: Partial<CharacterHeadSegmentProfile>
+): CharacterMakerDoc {
+  if (key === 'headCrown') {
+    const cur = doc.headCrown ?? createDefaultHeadCrown(doc.head);
+    return { ...doc, headCrown: { ...cur, ...patch } };
+  }
+  const cur = doc.headJaw ?? createDefaultHeadJaw(doc.head);
+  return { ...doc, headJaw: { ...cur, ...patch } };
 }
 
 function ProfileCurvePreview({ profile }: { profile: CharacterLimbProfile }) {
@@ -486,8 +522,8 @@ export const CharacterMakerModal: React.FC<CharacterMakerModalProps> = ({
   onClose,
 }) => {
   const [editingAssetId, setEditingAssetId] = useState<string | null>(initialAssetId);
-  const [charName, setCharName] = useState<string>('Adventurer Hero');
-  const [doc, setDoc] = useState<CharacterMakerDoc>(() => createDefaultCharacterDoc());
+  const [charName, setCharName] = useState<string>('Standard Humanoid');
+  const [doc, setDoc] = useState<CharacterMakerDoc>(() => createCharacterPresetDoc('standardHumanoid'));
   const [undoStack, setUndoStack] = useState<CharacterMakerDoc[]>([]);
   const [redoStack, setRedoStack] = useState<CharacterMakerDoc[]>([]);
 
@@ -612,14 +648,48 @@ export const CharacterMakerModal: React.FC<CharacterMakerModalProps> = ({
     });
   };
 
+  const speciesDefaultsVersion = useDefaultCharacterPresetsVersion();
+  const activeSpeciesId: CharacterPresetId = doc.presetId ?? 'standardHumanoid';
+  const activeSpeciesInfo = CHARACTER_PRESETS.find((p) => p.id === activeSpeciesId) ?? CHARACTER_PRESETS[0];
+  const hasCustomSpeciesDefault = hasSavedCharacterSpeciesDefault(activeSpeciesId);
+
   const applyPreset = (presetId: CharacterPresetId) => {
     const info = CHARACTER_PRESETS.find((p) => p.id === presetId);
     const next = createCharacterPresetDoc(presetId);
+    const wasCustomized = hasSavedCharacterSpeciesDefault(presetId);
     updateDoc(() => next, true);
-    setPaintStrokes([]);
+    setPaintStrokes(
+      Array.isArray(next.vertexPaintStrokes)
+        ? (JSON.parse(JSON.stringify(next.vertexPaintStrokes)) as VertexPaintStroke[])
+        : []
+    );
     setPaintRedoStack([]);
     if (info) setCharName(info.name);
-    flashToast(`Loaded "${info?.name ?? presetId}" preset`);
+    flashToast(
+      wasCustomized
+        ? `Loaded your saved "${info?.name ?? presetId}" species default`
+        : `Loaded "${info?.name ?? presetId}" preset`
+    );
+  };
+
+  const handleSaveAsSpeciesDefault = () => {
+    const strokesToSave = paintStrokes.length > 0 ? paintStrokes : undefined;
+    const docToSave: CharacterMakerDoc = {
+      ...doc,
+      presetId: activeSpeciesId,
+      vertexPaintStrokes: strokesToSave,
+    };
+    saveCharacterSpeciesDefault(activeSpeciesId, docToSave, charName);
+    flashToast(`Saved as "${activeSpeciesInfo.name}" species default in dropdown!`);
+  };
+
+  const handleResetSpeciesDefault = () => {
+    resetCharacterSpeciesDefault(activeSpeciesId);
+    const factory = activeSpeciesInfo.build();
+    updateDoc(() => factory, true);
+    setPaintStrokes([]);
+    setPaintRedoStack([]);
+    flashToast(`Reset "${activeSpeciesInfo.name}" back to factory preset`);
   };
 
   const randomizeCharacter = () => {
@@ -1645,7 +1715,7 @@ export const CharacterMakerModal: React.FC<CharacterMakerModalProps> = ({
         <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
           {/* LEFT DOCK */}
           <aside className="w-full lg:w-[228px] xl:w-[244px] shrink-0 border-b lg:border-b-0 lg:border-r border-slate-200/80 dark:border-white/[0.08] bg-slate-50/70 dark:bg-[#11141E] p-2.5 overflow-y-auto maker-scroll space-y-3 max-h-48 lg:max-h-none">
-            <div className="space-y-2.5">
+            <div className="space-y-2.5" data-species-ver={speciesDefaultsVersion}>
               <div className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 px-1">
                 Base Presets
               </div>
@@ -1678,26 +1748,60 @@ export const CharacterMakerModal: React.FC<CharacterMakerModalProps> = ({
                           applyPreset(e.target.value as CharacterPresetId);
                         }
                       }}
-                      className={`w-full px-2.5 py-2 rounded-xl border text-[11px] font-bold transition-colors focus:outline-none ${
+                      className={`w-full px-2.5 py-2 rounded-xl border text-[11px] font-bold transition-colors focus:outline-none dark:[color-scheme:dark] ${
                         activeItem
-                          ? 'bg-[#7C5CFF]/14 border-[#7C5CFF] text-slate-900 dark:text-white'
-                          : 'bg-white dark:bg-[#171B27] border-slate-200/80 dark:border-white/[0.08] text-slate-700 dark:text-[#C8D0E4] hover:border-[#7C5CFF]/50'
+                          ? 'bg-[#EDE9FE] dark:bg-[#231E3F] border-[#7C5CFF] text-slate-900 dark:text-white'
+                          : 'bg-white dark:bg-[#171B27] border-slate-200/80 dark:border-white/[0.08] text-slate-800 dark:text-[#E2E8F0] hover:border-[#7C5CFF]/50'
                       }`}
                     >
                       {!activeItem && (
-                        <option value="" disabled>
+                        <option
+                          value=""
+                          disabled
+                          className="bg-white text-slate-500 dark:bg-[#171B27] dark:text-[#949BB0]"
+                        >
                           Select {label.toLowerCase()}…
                         </option>
                       )}
-                      {items.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name} — {p.subtitle}
-                        </option>
-                      ))}
+                      {items.map((p) => {
+                        const isSavedCustom = hasSavedCharacterSpeciesDefault(p.id);
+                        return (
+                          <option
+                            key={p.id}
+                            value={p.id}
+                            className="bg-white text-slate-900 dark:bg-[#171B27] dark:text-white"
+                          >
+                            {isSavedCustom ? '★ ' : ''}
+                            {p.name} — {p.subtitle}
+                          </option>
+                        );
+                      })}
                     </select>
                   </label>
                 );
               })}
+
+              {/* Save / Reset Edited Character as Species Default */}
+              <div className="pt-1 space-y-1.5">
+                <button
+                  type="button"
+                  onClick={handleSaveAsSpeciesDefault}
+                  title={`Overwrite "${activeSpeciesInfo.name}" in the dropdown with your current edits`}
+                  className="w-full py-1.5 px-2.5 rounded-xl bg-[#7C5CFF]/15 hover:bg-[#7C5CFF] text-[#7C5CFF] hover:text-white border border-[#7C5CFF]/35 text-[10.5px] font-extrabold transition-colors flex items-center justify-center gap-1.5"
+                >
+                  <Save size={11} />
+                  <span className="truncate">Set as {activeSpeciesInfo.name} Default</span>
+                </button>
+                {hasCustomSpeciesDefault && (
+                  <button
+                    type="button"
+                    onClick={handleResetSpeciesDefault}
+                    className="w-full py-1 px-2 rounded-lg bg-slate-200/70 dark:bg-[#181C28] hover:bg-rose-500/15 text-slate-600 dark:text-[#9CA5BC] hover:text-rose-400 text-[10px] font-bold transition-colors"
+                  >
+                    Reset {activeSpeciesInfo.name} to Factory
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="space-y-1.5 pt-1 border-t border-slate-200/70 dark:border-white/[0.06]">
@@ -2060,6 +2164,31 @@ export const CharacterMakerModal: React.FC<CharacterMakerModalProps> = ({
                       </>
                     ) : (
                       <>
+                        {(activePart === 'head' || activePart === 'headCrown' || activePart === 'headJaw') && (
+                          <div className="grid grid-cols-3 gap-1 p-1 rounded-xl bg-white/80 dark:bg-[#141722]">
+                            {(
+                              [
+                                { key: 'head', label: 'Main Skull' },
+                                { key: 'headCrown', label: 'Crown / Brow' },
+                                { key: 'headJaw', label: 'Jaw / Chin' },
+                              ] as const
+                            ).map((seg) => (
+                              <button
+                                key={seg.key}
+                                type="button"
+                                onClick={() => setActivePart(seg.key)}
+                                className={`py-1 px-1 rounded-lg text-[10px] font-extrabold transition-colors truncate ${
+                                  activePart === seg.key
+                                    ? 'bg-[#7C5CFF] text-white'
+                                    : 'text-slate-500 dark:text-[#8D95AA] hover:text-slate-900 dark:hover:text-white'
+                                }`}
+                              >
+                                {seg.label}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+
                         <ProfileCurvePreview profile={activeProfile} />
 
                         {renderSliderRow(
@@ -2131,6 +2260,43 @@ export const CharacterMakerModal: React.FC<CharacterMakerModalProps> = ({
                             (val) =>
                               updateDoc((d) => setLimbProfile(d, activePart, (p) => ({ ...p, squashZ: val })))
                           )}
+                        {(activePart === 'headCrown' || activePart === 'headJaw') && (() => {
+                          const hSeg =
+                            activePart === 'headCrown' ? ext.headCrown : ext.headJaw;
+                          return (
+                            <div className="space-y-2.5 pt-2 border-t border-slate-200/70 dark:border-white/[0.08]">
+                              {renderSliderRow(
+                                'Vertical Offset (Y)',
+                                hSeg.offsetY,
+                                -0.14,
+                                0.18,
+                                0.004,
+                                (val) =>
+                                  updateDoc((d) => updateHeadSegment(d, activePart, { offsetY: val })),
+                                'm'
+                              )}
+                              {renderSliderRow(
+                                'Forward / Back Offset (Z)',
+                                hSeg.offsetZ,
+                                -0.14,
+                                0.16,
+                                0.004,
+                                (val) =>
+                                  updateDoc((d) => updateHeadSegment(d, activePart, { offsetZ: val })),
+                                'm'
+                              )}
+                              {renderSliderRow(
+                                'Clay Blend Tightness',
+                                hSeg.blendScale,
+                                0.15,
+                                1.0,
+                                0.04,
+                                (val) =>
+                                  updateDoc((d) => updateHeadSegment(d, activePart, { blendScale: val }))
+                              )}
+                            </div>
+                          );
+                        })()}
                         {renderColorRow('Part Color (Blends at Joints)', activeProfile.color, (hex) =>
                           updateDoc((d) => setLimbProfile(d, activePart, (p) => ({ ...p, color: hex })))
                         )}

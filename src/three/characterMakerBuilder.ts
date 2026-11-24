@@ -5,6 +5,8 @@ import type {
   CharacterBeakStyle,
   CharacterEyebrowExpression,
   CharacterHairStyle,
+  CharacterHeadSegmentProfile,
+  CharacterLimbProfile,
   CharacterMakerDoc,
   CharacterMaterialFinish,
   CharacterMouthStyle,
@@ -17,6 +19,7 @@ import type {
   CharacterSurfaceCoatConfig,
   CharacterTeethStyle,
 } from '../types/maker';
+import { getSavedCharacterSpeciesDefault } from '../utils/defaultCharacterPresets';
 import {
   polygonizeSdfToGeometry,
   SdfFieldEvaluator,
@@ -354,6 +357,40 @@ export interface ResolvedCharacterExtras {
   surfaceCoat: CharacterSurfaceCoatConfig;
   spikes: CharacterSpikesConfig;
   addons: CharacterAddonConfig;
+  headCrown: CharacterHeadSegmentProfile;
+  headJaw: CharacterHeadSegmentProfile;
+}
+
+export function createDefaultHeadCrown(head: CharacterLimbProfile): CharacterHeadSegmentProfile {
+  return {
+    startRadius: Number(Math.max(0.02, head.endRadius * 0.78).toFixed(3)),
+    midRadius: Number(Math.max(0.02, head.endRadius * 0.68).toFixed(3)),
+    endRadius: Number(Math.max(0.018, head.endRadius * 0.44).toFixed(3)),
+    curvature: 0.15,
+    length: Number(Math.max(0.04, head.endRadius * 0.44).toFixed(3)),
+    squashX: Number((head.squashX ?? 1.0).toFixed(2)),
+    squashZ: Number((head.squashZ ?? 1.02).toFixed(2)),
+    color: head.color,
+    offsetY: 0,
+    offsetZ: 0,
+    blendScale: 0.72,
+  };
+}
+
+export function createDefaultHeadJaw(head: CharacterLimbProfile): CharacterHeadSegmentProfile {
+  return {
+    startRadius: Number(Math.max(0.02, head.startRadius * 0.74).toFixed(3)),
+    midRadius: Number(Math.max(0.02, head.startRadius * 0.65).toFixed(3)),
+    endRadius: Number(Math.max(0.016, head.startRadius * 0.48).toFixed(3)),
+    curvature: 0.1,
+    length: 0.06,
+    squashX: Number(((head.squashX ?? 1.0) * 0.94).toFixed(2)),
+    squashZ: Number(((head.squashZ ?? 1.0) * 0.96).toFixed(2)),
+    color: head.color,
+    offsetY: 0.018,
+    offsetZ: 0.016,
+    blendScale: 0.62,
+  };
 }
 
 export function createDefaultSurfaceCoat(): CharacterSurfaceCoatConfig {
@@ -481,6 +518,8 @@ export function resolveCharacterExtras(doc: CharacterMakerDoc): ResolvedCharacte
     surfaceCoat: { ...createDefaultSurfaceCoat(), ...(doc.surfaceCoat ?? {}) },
     spikes: { ...createDefaultSpikesConfig(), ...(doc.spikes ?? {}) },
     addons: { ...createDefaultAddonConfig(), ...(doc.addons ?? {}) },
+    headCrown: { ...createDefaultHeadCrown(doc.head), ...(doc.headCrown ?? {}) },
+    headJaw: { ...createDefaultHeadJaw(doc.head), ...(doc.headJaw ?? {}) },
   };
 }
 
@@ -1800,6 +1839,10 @@ export const CHARACTER_PRESETS: CharacterPresetInfo[] = [
 ];
 
 export function createCharacterPresetDoc(id: CharacterPresetId): CharacterMakerDoc {
+  const saved = getSavedCharacterSpeciesDefault(id);
+  if (saved) {
+    return { ...saved, presetId: id };
+  }
   const found = CHARACTER_PRESETS.find((p) => p.id === id) ?? CHARACTER_PRESETS[0];
   return found.build();
 }
@@ -3768,7 +3811,7 @@ export function buildCharacterRigAndMesh(
     boneLerp: 0.55,
   });
 
-  // Head
+  // Head (Main Skull + Crown/Brow Segment + Jaw/Chin Segment)
   const headBotY = neckBaseY + doc.neck.length + 0.01;
   const headTopY = headBotY + doc.head.length * 0.65;
   prims.push({
@@ -3782,6 +3825,44 @@ export function buildCharacterRigAndMesh(
     curvature: doc.head.curvature,
     blendScale: 0.85,
     color: hexToRgbTuple(doc.head.color),
+    boneA: headB.index,
+  });
+
+  // Head Segment 2: Upper Crown / Forehead / Brow Dome
+  const crownProf = ext.headCrown;
+  const crownStartY = headTopY - 0.01 + crownProf.offsetY;
+  const crownEndY = crownStartY + crownProf.length;
+  prims.push({
+    kind: 'capsule',
+    a: [0, crownStartY, doc.headForwardTilt * 0.9 + crownProf.offsetZ],
+    b: [0, crownEndY, doc.headForwardTilt * 0.85 + crownProf.offsetZ],
+    oval: [crownProf.squashX ?? 1.0, crownProf.squashZ ?? 1.02],
+    startRadius: crownProf.startRadius,
+    midRadius: crownProf.midRadius,
+    endRadius: crownProf.endRadius,
+    curvature: crownProf.curvature,
+    blendScale: crownProf.blendScale,
+    color: hexToRgbTuple(crownProf.color || doc.head.color),
+    boneA: headB.index,
+  });
+
+  // Head Segment 3: Lower Jaw / Chin / Jowl Sculpt
+  const jawProf = ext.headJaw;
+  const jawStartY = headBotY + jawProf.offsetY;
+  const jawEndY = jawStartY - jawProf.length * 0.68;
+  const jawStartZ = doc.headForwardTilt + jawProf.offsetZ;
+  const jawEndZ = jawStartZ + jawProf.length * 0.48;
+  prims.push({
+    kind: 'capsule',
+    a: [0, jawStartY, jawStartZ],
+    b: [0, jawEndY, jawEndZ],
+    oval: [jawProf.squashX ?? 0.94, jawProf.squashZ ?? 0.96],
+    startRadius: jawProf.startRadius,
+    midRadius: jawProf.midRadius,
+    endRadius: jawProf.endRadius,
+    curvature: jawProf.curvature,
+    blendScale: jawProf.blendScale,
+    color: hexToRgbTuple(jawProf.color || doc.head.color),
     boneA: headB.index,
   });
 
@@ -5318,7 +5399,11 @@ export function buildCharacterRigAndMesh(
   skinnedMesh.bind(skeleton);
 
   // 4b. Attach layered Hair Studio object directly to Head Bone
-  const crownLocalY = (headTopY + doc.head.endRadius * 0.55) - headCenterY;
+  const effectiveHeadTopY = Math.max(
+    headTopY + doc.head.endRadius * 0.55,
+    crownEndY + crownProf.endRadius * 0.45
+  );
+  const crownLocalY = effectiveHeadTopY - headCenterY;
   const layeredHair = buildLayeredHairGroup(
     doc,
     ext,
@@ -5797,6 +5882,8 @@ export function buildCharacterRigAndMesh(
 
   const partAnchors = [
     { key: 'head', worldPos: headPos },
+    { key: 'headCrown', worldPos: new THREE.Vector3(0, (crownStartY + crownEndY) * 0.5, doc.headForwardTilt + crownProf.offsetZ) },
+    { key: 'headJaw', worldPos: new THREE.Vector3(0, (jawStartY + jawEndY) * 0.5, (jawStartZ + jawEndZ) * 0.5) },
     { key: 'neck', worldPos: neckPos },
     { key: 'torso', worldPos: new THREE.Vector3(0, (chestY + neckBaseY) * 0.5, 0) },
     { key: 'belly', worldPos: spinePos },
