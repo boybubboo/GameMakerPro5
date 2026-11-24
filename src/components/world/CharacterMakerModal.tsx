@@ -33,7 +33,10 @@ import {
   buildCharacterRigAndMesh,
   CHARACTER_PRESETS,
   createCharacterPresetDoc,
+  createDefaultAddonConfig,
   createDefaultCharacterDoc,
+  createDefaultSpikesConfig,
+  createDefaultSurfaceCoat,
   createMuzzlePreset,
   getBeakPresetDefaults,
   MUZZLE_PRESET_OPTIONS,
@@ -53,14 +56,18 @@ import {
 import { MakerVertexPaintSession } from '../../three/vertexPaintViewportHelper';
 import { VertexPaintInspector } from './VertexPaintInspector';
 import type {
+  CharacterAddonConfig,
   CharacterBeakStyle,
+  CharacterBodyGearStyle,
   CharacterBodyPartKey,
   CharacterEarStyle,
   CharacterEyebrowExpression,
   CharacterEyePupilStyle,
+  CharacterEyewearStyle,
   CharacterFootStyle,
   CharacterHairStyle,
   CharacterHandStyle,
+  CharacterHeadGearStyle,
   CharacterHornStyle,
   CharacterLimbProfile,
   CharacterMakerDoc,
@@ -72,6 +79,11 @@ import type {
   CharacterNoseStyle,
   CharacterNostrilStyle,
   CharacterPresetId,
+  CharacterSpikesConfig,
+  CharacterSpikesStyle,
+  CharacterSpikesZone,
+  CharacterSurfaceCoatConfig,
+  CharacterSurfaceCoatMode,
   CharacterTailStyle,
   CharacterTeethStyle,
   CharacterWingStyle,
@@ -87,7 +99,7 @@ export interface CharacterMakerModalProps {
   onClose: () => void;
 }
 
-type InspectorTab = 'body' | 'limbs' | 'extras' | 'eyes' | 'paint';
+type InspectorTab = 'body' | 'limbs' | 'coat' | 'extras' | 'eyes' | 'paint';
 type PreviewAnimMode = 'rest' | CustomClipSlot;
 type CameraPreset = 'fullBody' | 'face' | 'side' | 'back';
 
@@ -183,17 +195,87 @@ const TAIL_OPTIONS: { id: CharacterTailStyle; label: string }[] = [
   { id: 'fin', label: 'Fin Tail' },
 ];
 
-const HAIR_OPTIONS: { id: CharacterHairStyle; label: string }[] = [
+const HAIR_OPTIONS: {
+  id: CharacterHairStyle;
+  label: string;
+  group: 'male' | 'female' | 'creature';
+}[] = [
+  // Male / Unisex
+  { id: 'shortCrop', label: 'Short Crop', group: 'male' },
+  { id: 'sidePart', label: 'Side Part', group: 'male' },
+  { id: 'pompadour', label: 'Pompadour', group: 'male' },
+  { id: 'messySpiky', label: 'Messy Spiky', group: 'male' },
+  { id: 'undercut', label: 'Undercut', group: 'male' },
+  { id: 'buzzFade', label: 'Buzz Fade', group: 'male' },
+  { id: 'surferCurtains', label: 'Surfer Part', group: 'male' },
+  // Female / Long
+  { id: 'longStraight', label: 'Long Straight', group: 'female' },
+  { id: 'bobCut', label: 'Classic Bob', group: 'female' },
+  { id: 'wavyShoulder', label: 'Wavy Shoulder', group: 'female' },
+  { id: 'twinPigtails', label: 'Twin Pigtails', group: 'female' },
+  { id: 'highBun', label: 'High Bun', group: 'female' },
+  { id: 'braidedCrown', label: 'Braided Crown', group: 'female' },
+  { id: 'ponytail', label: 'Ponytail', group: 'female' },
+  { id: 'curlyAfro', label: 'Curly Afro', group: 'female' },
+  // Creature & Stylized
+  { id: 'spikyTufts', label: 'Spiky Tufts', group: 'creature' },
+  { id: 'mohawk', label: 'Crest / Mohawk', group: 'creature' },
+  { id: 'curlSwirl', label: 'Curl Swirl', group: 'creature' },
+  { id: 'mushroomCap', label: 'Cap Dome', group: 'creature' },
+  { id: 'horseMane', label: 'Horse Mane', group: 'creature' },
+  { id: 'lionMane', label: 'Lion Mane', group: 'creature' },
+  { id: 'featherTuft', label: 'Feather Tuft', group: 'creature' },
+  { id: 'fluffyBangs', label: 'Fluffy Bangs', group: 'creature' },
+];
+
+const SURFACE_COAT_OPTIONS: { id: CharacterSurfaceCoatMode; label: string; desc: string }[] = [
+  { id: 'none', label: 'Smooth / None', desc: 'Clean base surface' },
+  { id: 'furShort', label: 'Short Fur', desc: 'Plush micro-tufts' },
+  { id: 'furLong', label: 'Long Shaggy Fur', desc: 'Layered flowing pelage' },
+  { id: 'furClumped', label: 'Clumped Fur', desc: 'Chunky stylized locks' },
+  { id: 'scalesFish', label: 'Fish Scales', desc: 'Overlapping rounded shingles' },
+  { id: 'scalesDragon', label: 'Dragon Scales', desc: 'Pointed armored scutes' },
+  { id: 'scalesHex', label: 'Hex Reptile', desc: 'Crisp hex plate pattern' },
+];
+
+const SPIKES_STYLE_OPTIONS: { id: CharacterSpikesStyle; label: string }[] = [
+  { id: 'porcupineQuills', label: 'Porcupine Quills' },
+  { id: 'boneSpikes', label: 'Monster Spikes' },
+  { id: 'dorsalFins', label: 'Dorsal Fins' },
+  { id: 'crystalSpines', label: 'Crystal Spines' },
+];
+
+const SPIKES_ZONE_OPTIONS: { id: CharacterSpikesZone; label: string }[] = [
+  { id: 'spine', label: 'Spine Ridge' },
+  { id: 'headAndBack', label: 'Head & Back' },
+  { id: 'shouldersAndBack', label: 'Shoulders & Back' },
+  { id: 'fullBody', label: 'Full Body' },
+];
+
+const EYEWEAR_OPTIONS: { id: CharacterEyewearStyle; label: string }[] = [
   { id: 'none', label: 'None' },
-  { id: 'horseMane', label: 'Horse Mane' },
-  { id: 'lionMane', label: 'Lion Mane' },
-  { id: 'featherTuft', label: 'Feather Tuft' },
-  { id: 'fluffyBangs', label: 'Fluffy Bangs' },
-  { id: 'spikyTufts', label: 'Spiky Tufts' },
-  { id: 'mohawk', label: 'Crest / Mohawk' },
-  { id: 'curlSwirl', label: 'Curl Swirl' },
-  { id: 'ponytail', label: 'Ponytail' },
-  { id: 'mushroomCap', label: 'Cap Dome' },
+  { id: 'roundGlasses', label: 'Round Glasses' },
+  { id: 'goggles', label: 'Pilot Goggles' },
+  { id: 'cyberVisor', label: 'Cyber Visor' },
+  { id: 'monocle', label: 'Monocle' },
+];
+
+const HEADGEAR_OPTIONS: { id: CharacterHeadGearStyle; label: string }[] = [
+  { id: 'none', label: 'None' },
+  { id: 'adventurerCap', label: 'Adventurer Cap' },
+  { id: 'wizardHat', label: 'Wizard Hat' },
+  { id: 'crown', label: 'Royal Crown' },
+  { id: 'halo', label: 'Angel Halo' },
+  { id: 'flowerCrown', label: 'Flower Crown' },
+];
+
+const BODYGEAR_OPTIONS: { id: CharacterBodyGearStyle; label: string }[] = [
+  { id: 'none', label: 'None' },
+  { id: 'backpack', label: 'Backpack' },
+  { id: 'quiver', label: 'Arrow Quiver' },
+  { id: 'cape', label: 'Hero Cape' },
+  { id: 'scarf', label: 'Cozy Scarf' },
+  { id: 'pauldrons', label: 'Armor Pauldrons' },
 ];
 
 const PUPIL_OPTIONS: { id: CharacterEyePupilStyle; label: string }[] = [
@@ -411,6 +493,7 @@ export const CharacterMakerModal: React.FC<CharacterMakerModalProps> = ({
 
   const [activePart, setActivePart] = useState<CharacterBodyPartKey>('upperLeg');
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('body');
+  const [hairGroupFilter, setHairGroupFilter] = useState<'all' | 'male' | 'female' | 'creature'>('all');
   const [animMode, setAnimMode] = useState<PreviewAnimMode>('idle');
   const [paintStrokes, setPaintStrokes] = useState<VertexPaintStroke[]>(
     () => (doc.vertexPaintStrokes ? JSON.parse(JSON.stringify(doc.vertexPaintStrokes)) : [])
@@ -1562,72 +1645,59 @@ export const CharacterMakerModal: React.FC<CharacterMakerModalProps> = ({
         <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
           {/* LEFT DOCK */}
           <aside className="w-full lg:w-[228px] xl:w-[244px] shrink-0 border-b lg:border-b-0 lg:border-r border-slate-200/80 dark:border-white/[0.08] bg-slate-50/70 dark:bg-[#11141E] p-2.5 overflow-y-auto maker-scroll space-y-3 max-h-48 lg:max-h-none">
-            <div className="space-y-1.5">
+            <div className="space-y-2.5">
               <div className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 px-1">
-                Storybook Animals
+                Base Presets
               </div>
-              <div className="grid grid-cols-2 lg:grid-cols-1 gap-1.5">
-                {CHARACTER_PRESETS.filter((p) => p.group === 'storybook').map((p) => {
-                  const active = doc.presetId === p.id;
-                  return (
-                    <button
-                      key={p.id}
-                      type="button"
-                      onClick={() => applyPreset(p.id)}
-                      className={`p-2 rounded-xl border text-left transition-all ${
-                        active
+              {(
+                [
+                  { category: 'humans', label: 'Humans' },
+                  { category: 'animals', label: 'Animals' },
+                  { category: 'creatures', label: 'Creatures' },
+                ] as const
+              ).map(({ category, label }) => {
+                const items = CHARACTER_PRESETS.filter((p) => p.category === category);
+                const activeItem = items.find((p) => p.id === doc.presetId);
+                return (
+                  <label key={category} className="block space-y-1">
+                    <div className="flex items-center justify-between px-1">
+                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 dark:text-[#8D95AA]">
+                        {label}
+                      </span>
+                      {activeItem && (
+                        <span
+                          className="w-2 h-2 rounded-full"
+                          style={{ backgroundColor: activeItem.accentHex }}
+                        />
+                      )}
+                    </div>
+                    <select
+                      value={activeItem ? activeItem.id : ''}
+                      onChange={(e) => {
+                        if (e.target.value) {
+                          applyPreset(e.target.value as CharacterPresetId);
+                        }
+                      }}
+                      className={`w-full px-2.5 py-2 rounded-xl border text-[11px] font-bold transition-colors focus:outline-none ${
+                        activeItem
                           ? 'bg-[#7C5CFF]/14 border-[#7C5CFF] text-slate-900 dark:text-white'
-                          : 'bg-white dark:bg-[#171B27] border-slate-200/70 dark:border-white/[0.07] hover:border-[#7C5CFF]/50'
+                          : 'bg-white dark:bg-[#171B27] border-slate-200/80 dark:border-white/[0.08] text-slate-700 dark:text-[#C8D0E4] hover:border-[#7C5CFF]/50'
                       }`}
                     >
-                      <div className="flex items-center gap-2">
-                        <span
-                          className="w-2.5 h-2.5 rounded-full shrink-0"
-                          style={{ backgroundColor: p.accentHex }}
-                        />
-                        <span className="text-[11px] font-extrabold truncate">{p.name}</span>
-                      </div>
-                      <div className="text-[10px] text-slate-500 dark:text-[#8D95AA] truncate mt-0.5 hidden lg:block">
-                        {p.subtitle}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="space-y-1.5 pt-1 border-t border-slate-200/70 dark:border-white/[0.06]">
-              <div className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 px-1">
-                Heroes &amp; Creatures
-              </div>
-              <div className="grid grid-cols-2 lg:grid-cols-1 gap-1.5">
-                {CHARACTER_PRESETS.filter((p) => p.group === 'hero').map((p) => {
-                  const active = doc.presetId === p.id;
-                  return (
-                    <button
-                      key={p.id}
-                      type="button"
-                      onClick={() => applyPreset(p.id)}
-                      className={`p-2 rounded-xl border text-left transition-all ${
-                        active
-                          ? 'bg-[#7C5CFF]/14 border-[#7C5CFF] text-slate-900 dark:text-white'
-                          : 'bg-white dark:bg-[#171B27] border-slate-200/70 dark:border-white/[0.07] hover:border-[#7C5CFF]/50'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2">
-                        <span
-                          className="w-2.5 h-2.5 rounded-full shrink-0"
-                          style={{ backgroundColor: p.accentHex }}
-                        />
-                        <span className="text-[11px] font-extrabold truncate">{p.name}</span>
-                      </div>
-                      <div className="text-[10px] text-slate-500 dark:text-[#8D95AA] truncate mt-0.5 hidden lg:block">
-                        {p.subtitle}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
+                      {!activeItem && (
+                        <option value="" disabled>
+                          Select {label.toLowerCase()}…
+                        </option>
+                      )}
+                      {items.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name} — {p.subtitle}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                );
+              })}
             </div>
 
             <div className="space-y-1.5 pt-1 border-t border-slate-200/70 dark:border-white/[0.06]">
@@ -1767,21 +1837,22 @@ export const CharacterMakerModal: React.FC<CharacterMakerModalProps> = ({
 
           {/* RIGHT CONTEXTUAL INSPECTOR */}
           <aside className="w-full lg:w-[325px] xl:w-[355px] shrink-0 border-t lg:border-t-0 lg:border-l border-slate-200/80 dark:border-white/[0.08] bg-white dark:bg-[#151824] flex flex-col min-h-0 max-h-80 lg:max-h-none">
-            <div className="shrink-0 p-2 border-b border-slate-200/80 dark:border-white/[0.08] grid grid-cols-5 gap-1 bg-slate-50/70 dark:bg-[#11141E]">
+            <div className="shrink-0 p-1.5 border-b border-slate-200/80 dark:border-white/[0.08] grid grid-cols-6 gap-1 bg-slate-50/70 dark:bg-[#11141E]">
               {(
                 [
                   { id: 'body', label: 'Body', Icon: Layers },
                   { id: 'limbs', label: 'Limbs', Icon: Hand },
+                  { id: 'coat', label: 'Hair/Coat', Icon: Sparkles },
                   { id: 'extras', label: 'Extras', Icon: Wand2 },
                   { id: 'eyes', label: 'Face', Icon: Eye },
-                  { id: 'paint', label: paintStrokes.length > 0 ? `Paint (${paintStrokes.length})` : 'Paint', Icon: Paintbrush },
+                  { id: 'paint', label: paintStrokes.length > 0 ? `Paint(${paintStrokes.length})` : 'Paint', Icon: Paintbrush },
                 ] as const
               ).map(({ id, label, Icon }) => (
                 <button
                   key={id}
                   type="button"
                   onClick={() => setInspectorTab(id)}
-                  className={`py-2 px-1 rounded-xl text-[10px] font-extrabold flex flex-col items-center justify-center gap-0.5 transition-colors whitespace-nowrap ${
+                  className={`py-2 px-0.5 rounded-xl text-[9.5px] font-extrabold flex flex-col items-center justify-center gap-0.5 transition-colors whitespace-nowrap ${
                     inspectorTab === id
                       ? 'bg-[#7C5CFF] text-white shadow-xs'
                       : 'text-slate-600 dark:text-[#9CA5BC] hover:bg-slate-200/60 dark:hover:bg-[#1E2333]'
@@ -2533,15 +2604,107 @@ export const CharacterMakerModal: React.FC<CharacterMakerModalProps> = ({
                       </>
                     )}
 
-                    <div className="pt-2 border-t border-slate-200/70 dark:border-white/[0.06] space-y-2">
-                      <div className="text-xs font-extrabold">Hair / Crown Crest</div>
-                      <div className="grid grid-cols-2 gap-1.5">
-                        {HAIR_OPTIONS.map((opt) => (
+                    <div className="pt-2 border-t border-slate-200/70 dark:border-white/[0.06]">
+                      <button
+                        type="button"
+                        onClick={() => setInspectorTab('coat')}
+                        className="w-full py-2 px-3 rounded-xl bg-[#7C5CFF]/15 hover:bg-[#7C5CFF]/25 text-[#7C5CFF] text-[11px] font-extrabold flex items-center justify-center gap-1.5 transition-colors"
+                      >
+                        <Sparkles size={13} />
+                        <span>Open Hair, Fur, Scales &amp; Spikes Studio →</span>
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {inspectorTab === 'coat' && (() => {
+                const sc: CharacterSurfaceCoatConfig = ext.surfaceCoat ?? createDefaultSurfaceCoat();
+                const sp: CharacterSpikesConfig = ext.spikes ?? createDefaultSpikesConfig();
+                const ad: CharacterAddonConfig = ext.addons ?? createDefaultAddonConfig();
+                const patchCoat = (patch: Partial<CharacterSurfaceCoatConfig>, record = false) =>
+                  updateDoc(
+                    (d) => ({
+                      ...d,
+                      surfaceCoat: { ...(d.surfaceCoat ?? createDefaultSurfaceCoat()), ...patch },
+                    }),
+                    record
+                  );
+                const patchSpikes = (patch: Partial<CharacterSpikesConfig>, record = false) =>
+                  updateDoc(
+                    (d) => ({
+                      ...d,
+                      spikes: { ...(d.spikes ?? createDefaultSpikesConfig()), ...patch },
+                    }),
+                    record
+                  );
+                const patchAddons = (patch: Partial<CharacterAddonConfig>, record = false) =>
+                  updateDoc(
+                    (d) => ({
+                      ...d,
+                      addons: { ...(d.addons ?? createDefaultAddonConfig()), ...patch },
+                    }),
+                    record
+                  );
+                const filteredHair =
+                  hairGroupFilter === 'all'
+                    ? HAIR_OPTIONS
+                    : HAIR_OPTIONS.filter((h) => h.group === hairGroupFilter);
+                return (
+                  <>
+                    {/* 1. Layered Hair Studio (Bone-Mounted Object) */}
+                    <div className="p-3 rounded-2xl bg-slate-100/80 dark:bg-[#1B1F2E] space-y-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <div>
+                          <div className="text-xs font-extrabold">Hair Studio (Layered Object)</div>
+                          <div className="text-[10px] text-slate-500 dark:text-[#8D95AA]">
+                            Independent scalp layer — move, rotate &amp; scale freely
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => updateDoc((d) => ({ ...d, hairStyle: 'none' }), true)}
+                          className={`px-2 py-1 rounded-lg text-[10px] font-extrabold border ${
+                            doc.hairStyle === 'none'
+                              ? 'bg-[#7C5CFF] text-white border-[#7C5CFF]'
+                              : 'bg-white dark:bg-[#141722] border-slate-200/70 dark:border-white/[0.08]'
+                          }`}
+                        >
+                          None
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-4 gap-1 p-1 rounded-xl bg-white/80 dark:bg-[#141722]">
+                        {(
+                          [
+                            { id: 'all', label: 'All' },
+                            { id: 'male', label: 'Male' },
+                            { id: 'female', label: 'Female' },
+                            { id: 'creature', label: 'Creature' },
+                          ] as const
+                        ).map((tab) => (
+                          <button
+                            key={tab.id}
+                            type="button"
+                            onClick={() => setHairGroupFilter(tab.id)}
+                            className={`py-1 rounded-lg text-[10px] font-extrabold transition-colors ${
+                              hairGroupFilter === tab.id
+                                ? 'bg-[#7C5CFF] text-white'
+                                : 'text-slate-500 dark:text-[#8D95AA] hover:text-slate-900 dark:hover:text-white'
+                            }`}
+                          >
+                            {tab.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-1.5 max-h-48 overflow-y-auto maker-scroll pr-0.5">
+                        {filteredHair.map((opt) => (
                           <button
                             key={opt.id}
                             type="button"
                             onClick={() => updateDoc((d) => ({ ...d, hairStyle: opt.id }), true)}
-                            className={`py-1.5 px-2 rounded-xl text-[11px] font-bold border ${
+                            className={`py-1.5 px-2 rounded-xl text-[11px] font-bold border text-left truncate ${
                               doc.hairStyle === opt.id
                                 ? 'bg-[#7C5CFF] text-white border-[#7C5CFF]'
                                 : 'bg-white dark:bg-[#141722] border-slate-200/70 dark:border-white/[0.07]'
@@ -2551,14 +2714,440 @@ export const CharacterMakerModal: React.FC<CharacterMakerModalProps> = ({
                           </button>
                         ))}
                       </div>
-                      {doc.hairStyle !== 'none' &&
-                        renderColorRow('Hair Color', doc.hairColor, (hex) =>
-                          updateDoc((d) => ({ ...d, hairColor: hex }))
-                        )}
+
+                      {doc.hairStyle !== 'none' && (
+                        <div className="space-y-2.5 pt-2 border-t border-slate-200/70 dark:border-white/[0.06]">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500">
+                              Placement, Rotation &amp; Scale
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                updateDoc(
+                                  (d) => ({
+                                    ...d,
+                                    hairOffsetX: 0,
+                                    hairOffsetY: 0,
+                                    hairOffsetZ: 0,
+                                    hairRotX: 0,
+                                    hairRotY: 0,
+                                    hairRotZ: 0,
+                                    hairScale: 1,
+                                  }),
+                                  true
+                                )
+                              }
+                              className="text-[10px] font-extrabold text-[#7C5CFF] hover:underline"
+                            >
+                              Reset Pose
+                            </button>
+                          </div>
+                          {renderSliderRow(
+                            'Hair Scale',
+                            ext.hairScale,
+                            0.55,
+                            1.75,
+                            0.02,
+                            (val) => updateDoc((d) => ({ ...d, hairScale: val })),
+                            '×'
+                          )}
+                          {renderSliderRow(
+                            'Offset Left / Right (X)',
+                            ext.hairOffsetX,
+                            -0.16,
+                            0.16,
+                            0.004,
+                            (val) => updateDoc((d) => ({ ...d, hairOffsetX: val })),
+                            'm'
+                          )}
+                          {renderSliderRow(
+                            'Offset Up / Down (Y)',
+                            ext.hairOffsetY,
+                            -0.16,
+                            0.16,
+                            0.004,
+                            (val) => updateDoc((d) => ({ ...d, hairOffsetY: val })),
+                            'm'
+                          )}
+                          {renderSliderRow(
+                            'Offset Front / Back (Z)',
+                            ext.hairOffsetZ,
+                            -0.16,
+                            0.16,
+                            0.004,
+                            (val) => updateDoc((d) => ({ ...d, hairOffsetZ: val })),
+                            'm'
+                          )}
+                          {renderSliderRow(
+                            'Tilt Forward / Back (Pitch)',
+                            ext.hairRotX,
+                            -45,
+                            45,
+                            1,
+                            (val) => updateDoc((d) => ({ ...d, hairRotX: val })),
+                            '°'
+                          )}
+                          {renderSliderRow(
+                            'Turn Left / Right (Yaw)',
+                            ext.hairRotY,
+                            -45,
+                            45,
+                            1,
+                            (val) => updateDoc((d) => ({ ...d, hairRotY: val })),
+                            '°'
+                          )}
+                          {renderSliderRow(
+                            'Roll Sideways',
+                            ext.hairRotZ,
+                            -45,
+                            45,
+                            1,
+                            (val) => updateDoc((d) => ({ ...d, hairRotZ: val })),
+                            '°'
+                          )}
+                          {renderColorRow('Hair Color', doc.hairColor, (hex) =>
+                            updateDoc((d) => ({ ...d, hairColor: hex }))
+                          )}
+                          {renderColorRow('Hair Band / Accent', ext.hairAccentColor, (hex) =>
+                            updateDoc((d) => ({ ...d, hairAccentColor: hex }))
+                          )}
+                        </div>
+                      )}
                     </div>
-                  </div>
-                </>
-              )}
+
+                    {/* 2. Fur & Scales Surface Coat */}
+                    <div className="p-3 rounded-2xl bg-slate-100/80 dark:bg-[#1B1F2E] space-y-3">
+                      <div>
+                        <div className="text-xs font-extrabold">Fur &amp; Scales Texture Coat</div>
+                        <div className="text-[10px] text-slate-500 dark:text-[#8D95AA]">
+                          Layered surface displacement + bone-bound 3D tufts or scales
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {SURFACE_COAT_OPTIONS.map((opt) => (
+                          <button
+                            key={opt.id}
+                            type="button"
+                            onClick={() => patchCoat({ mode: opt.id }, true)}
+                            title={opt.desc}
+                            className={`py-1.5 px-2 rounded-xl text-[11px] font-bold border text-left truncate ${
+                              sc.mode === opt.id
+                                ? 'bg-[#7C5CFF] text-white border-[#7C5CFF]'
+                                : 'bg-white dark:bg-[#141722] border-slate-200/70 dark:border-white/[0.07]'
+                            }`}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      {sc.mode !== 'none' && (
+                        <div className="space-y-2.5 pt-2 border-t border-slate-200/70 dark:border-white/[0.06]">
+                          {renderSliderRow(
+                            'Relief Intensity',
+                            sc.intensity,
+                            0.1,
+                            1.0,
+                            0.04,
+                            (val) => patchCoat({ intensity: val })
+                          )}
+                          {renderSliderRow(
+                            'Coverage Density',
+                            sc.density,
+                            0.25,
+                            1.6,
+                            0.05,
+                            (val) => patchCoat({ density: val }),
+                            '×'
+                          )}
+                          {renderSliderRow(
+                            'Tuft / Scale Size',
+                            sc.scaleSize,
+                            0.5,
+                            2.0,
+                            0.05,
+                            (val) => patchCoat({ scaleSize: val }),
+                            '×'
+                          )}
+                          {sc.mode.startsWith('fur') &&
+                            renderSliderRow(
+                              'Fur Clumpiness',
+                              sc.clumpiness,
+                              0,
+                              1.0,
+                              0.04,
+                              (val) => patchCoat({ clumpiness: val })
+                            )}
+                          {renderColorRow('Tip / Edge Highlight', sc.tipColor, (hex) =>
+                            patchCoat({ tipColor: hex })
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 3. Spikes, Quills & Dorsal Fins */}
+                    <div className="p-3 rounded-2xl bg-slate-100/80 dark:bg-[#1B1F2E] space-y-3">
+                      <label className="flex items-center justify-between text-xs font-extrabold cursor-pointer">
+                        <span>Spikes, Quills &amp; Fins</span>
+                        <input
+                          type="checkbox"
+                          checked={sp.enabled}
+                          onChange={(e) => patchSpikes({ enabled: e.target.checked }, true)}
+                          className="accent-[#7C5CFF] w-4 h-4"
+                        />
+                      </label>
+
+                      {sp.enabled && (
+                        <div className="space-y-2.5">
+                          <div className="grid grid-cols-2 gap-1.5">
+                            {SPIKES_STYLE_OPTIONS.map((opt) => (
+                              <button
+                                key={opt.id}
+                                type="button"
+                                onClick={() => patchSpikes({ style: opt.id }, true)}
+                                className={`py-1.5 px-2 rounded-xl text-[11px] font-bold border text-left truncate ${
+                                  sp.style === opt.id
+                                    ? 'bg-[#7C5CFF] text-white border-[#7C5CFF]'
+                                    : 'bg-white dark:bg-[#141722] border-slate-200/70 dark:border-white/[0.07]'
+                                }`}
+                              >
+                                {opt.label}
+                              </button>
+                            ))}
+                          </div>
+
+                          <div className="space-y-1">
+                            <span className="text-[10px] font-bold text-slate-500">Placement Zone</span>
+                            <div className="grid grid-cols-2 gap-1.5">
+                              {SPIKES_ZONE_OPTIONS.map((z) => (
+                                <button
+                                  key={z.id}
+                                  type="button"
+                                  onClick={() => patchSpikes({ zone: z.id }, true)}
+                                  className={`py-1 px-2 rounded-xl text-[10px] font-bold border truncate ${
+                                    sp.zone === z.id
+                                      ? 'bg-[#7C5CFF] text-white border-[#7C5CFF]'
+                                      : 'bg-white dark:bg-[#141722] border-slate-200/70 dark:border-white/[0.07]'
+                                  }`}
+                                >
+                                  {z.label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          {renderSliderRow(
+                            'Spike Count / Density',
+                            sp.density,
+                            0.25,
+                            1.6,
+                            0.05,
+                            (val) => patchSpikes({ density: val }),
+                            '×'
+                          )}
+                          {renderSliderRow(
+                            'Spike Length',
+                            sp.length,
+                            0.05,
+                            0.38,
+                            0.01,
+                            (val) => patchSpikes({ length: val }),
+                            'm'
+                          )}
+                          {renderSliderRow(
+                            'Thickness',
+                            sp.thickness,
+                            0.5,
+                            2.0,
+                            0.05,
+                            (val) => patchSpikes({ thickness: val }),
+                            '×'
+                          )}
+                          {renderSliderRow(
+                            'Backward Sweep',
+                            sp.sweepDeg,
+                            -15,
+                            75,
+                            2,
+                            (val) => patchSpikes({ sweepDeg: val }),
+                            '°'
+                          )}
+                          {renderColorRow('Base Color', sp.color, (hex) => patchSpikes({ color: hex }))}
+                          {renderColorRow('Tip Color', sp.tipColor, (hex) => patchSpikes({ tipColor: hex }))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 4. Fun Character Addons (Eyewear, Headwear, Back & Shoulder Gear) */}
+                    <div className="p-3 rounded-2xl bg-slate-100/80 dark:bg-[#1B1F2E] space-y-3">
+                      <div className="text-xs font-extrabold">Character Addons</div>
+
+                      {/* Eyewear */}
+                      <div className="space-y-2">
+                        <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500">
+                          Eyewear &amp; Visors
+                        </span>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          {EYEWEAR_OPTIONS.map((opt) => (
+                            <button
+                              key={opt.id}
+                              type="button"
+                              onClick={() => patchAddons({ eyewear: opt.id }, true)}
+                              className={`py-1.5 px-2 rounded-xl text-[11px] font-bold border text-left truncate ${
+                                ad.eyewear === opt.id
+                                  ? 'bg-[#7C5CFF] text-white border-[#7C5CFF]'
+                                  : 'bg-white dark:bg-[#141722] border-slate-200/70 dark:border-white/[0.07]'
+                              }`}
+                            >
+                              {opt.label}
+                            </button>
+                          ))}
+                        </div>
+                        {ad.eyewear !== 'none' && (
+                          <div className="space-y-2 pl-2 border-l-2 border-[#7C5CFF]/40">
+                            {renderSliderRow(
+                              'Eyewear Scale',
+                              ad.eyewearScale,
+                              0.6,
+                              1.6,
+                              0.04,
+                              (val) => patchAddons({ eyewearScale: val }),
+                              '×'
+                            )}
+                            {renderSliderRow(
+                              'Height Offset (Y)',
+                              ad.eyewearOffsetY,
+                              -0.08,
+                              0.08,
+                              0.004,
+                              (val) => patchAddons({ eyewearOffsetY: val }),
+                              'm'
+                            )}
+                            {renderSliderRow(
+                              'Forward Offset (Z)',
+                              ad.eyewearOffsetZ,
+                              -0.06,
+                              0.08,
+                              0.004,
+                              (val) => patchAddons({ eyewearOffsetZ: val }),
+                              'm'
+                            )}
+                            {renderColorRow('Frame Color', ad.eyewearColor, (hex) =>
+                              patchAddons({ eyewearColor: hex })
+                            )}
+                            {renderColorRow('Lens / Glow Color', ad.eyewearLensColor, (hex) =>
+                              patchAddons({ eyewearLensColor: hex })
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Headwear */}
+                      <div className="space-y-2 pt-2 border-t border-slate-200/70 dark:border-white/[0.06]">
+                        <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500">
+                          Hats, Crowns &amp; Halos
+                        </span>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          {HEADGEAR_OPTIONS.map((opt) => (
+                            <button
+                              key={opt.id}
+                              type="button"
+                              onClick={() => patchAddons({ headGear: opt.id }, true)}
+                              className={`py-1.5 px-2 rounded-xl text-[11px] font-bold border text-left truncate ${
+                                ad.headGear === opt.id
+                                  ? 'bg-[#7C5CFF] text-white border-[#7C5CFF]'
+                                  : 'bg-white dark:bg-[#141722] border-slate-200/70 dark:border-white/[0.07]'
+                              }`}
+                            >
+                              {opt.label}
+                            </button>
+                          ))}
+                        </div>
+                        {ad.headGear !== 'none' && (
+                          <div className="space-y-2 pl-2 border-l-2 border-[#7C5CFF]/40">
+                            {renderSliderRow(
+                              'Hat Scale',
+                              ad.headGearScale,
+                              0.6,
+                              1.65,
+                              0.04,
+                              (val) => patchAddons({ headGearScale: val }),
+                              '×'
+                            )}
+                            {renderSliderRow(
+                              'Height Offset (Y)',
+                              ad.headGearOffsetY,
+                              -0.08,
+                              0.14,
+                              0.004,
+                              (val) => patchAddons({ headGearOffsetY: val }),
+                              'm'
+                            )}
+                            {renderSliderRow(
+                              'Tilt Back / Forward',
+                              ad.headGearRotX,
+                              -35,
+                              35,
+                              1,
+                              (val) => patchAddons({ headGearRotX: val }),
+                              '°'
+                            )}
+                            {renderColorRow('Main Color', ad.headGearColor, (hex) =>
+                              patchAddons({ headGearColor: hex })
+                            )}
+                            {renderColorRow('Trim / Jewel Color', ad.headGearAccentColor, (hex) =>
+                              patchAddons({ headGearAccentColor: hex })
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Body Gear */}
+                      <div className="space-y-2 pt-2 border-t border-slate-200/70 dark:border-white/[0.06]">
+                        <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500">
+                          Back, Neck &amp; Shoulder Gear
+                        </span>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          {BODYGEAR_OPTIONS.map((opt) => (
+                            <button
+                              key={opt.id}
+                              type="button"
+                              onClick={() => patchAddons({ bodyGear: opt.id }, true)}
+                              className={`py-1.5 px-2 rounded-xl text-[11px] font-bold border text-left truncate ${
+                                ad.bodyGear === opt.id
+                                  ? 'bg-[#7C5CFF] text-white border-[#7C5CFF]'
+                                  : 'bg-white dark:bg-[#141722] border-slate-200/70 dark:border-white/[0.07]'
+                              }`}
+                            >
+                              {opt.label}
+                            </button>
+                          ))}
+                        </div>
+                        {ad.bodyGear !== 'none' && (
+                          <div className="space-y-2 pl-2 border-l-2 border-[#7C5CFF]/40">
+                            {renderSliderRow(
+                              'Gear Scale',
+                              ad.bodyGearScale,
+                              0.6,
+                              1.65,
+                              0.04,
+                              (val) => patchAddons({ bodyGearScale: val }),
+                              '×'
+                            )}
+                            {renderColorRow('Gear Color', ad.bodyGearColor, (hex) =>
+                              patchAddons({ bodyGearColor: hex })
+                            )}
+                            {renderColorRow('Accent / Strap Color', ad.bodyGearAccentColor, (hex) =>
+                              patchAddons({ bodyGearAccentColor: hex })
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </>
+                );
+              })()}
 
               {inspectorTab === 'eyes' && (
                 <>

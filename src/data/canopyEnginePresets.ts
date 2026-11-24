@@ -563,10 +563,15 @@ export function resolveSpeciesConfig(
   }
   const saved = rootConfig.speciesProfiles?.[species];
   if (saved) {
+    const keepSpecialType =
+      saved.treeGeneratorMode === 'ezTree' ||
+      saved.treeType === 'fantasy' ||
+      saved.treeType === 'custom';
+    const resolvedType = keepSpecialType && saved.treeType ? saved.treeType : species;
     return {
-      ...createDefaultSpeciesConfig(species),
+      ...createDefaultSpeciesConfig(resolvedType),
       ...saved,
-      treeType: species,
+      treeType: resolvedType,
       enabled: rootConfig.enabled,
       targetTrees: rootConfig.targetTrees,
     };

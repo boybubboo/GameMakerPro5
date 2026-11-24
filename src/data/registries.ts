@@ -58,6 +58,7 @@ import {
   RiverCrossing,
   uid,
 } from '../utils/terrain';
+import { buildCanopyConfigFromUserDefaults } from '../utils/defaultTreeStyles';
 
 export const Palette = {
   background: '#0F1117',
@@ -1951,6 +1952,7 @@ export function createBlankLevel(
     vistaPreset: environmentType === 'openWorld' || environmentType === 'castle' ? 'alpineValley' : 'none',
     vistaDensity: 0.85,
     vistaItems: [],
+    canopyEngine: buildCanopyConfigFromUserDefaults(undefined),
     wind: 0.3,
     canSwim: true,
     notes: '',

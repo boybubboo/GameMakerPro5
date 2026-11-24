@@ -151,8 +151,11 @@ import {
 } from './webglUtils';
 import {
   buildProceduralCanopyForest,
+  buildSingleCanopyTreeGroup,
   computeWeatherWindFactor,
 } from './canopyClusterBuilder';
+import { buildVistaTreeSpeciesInstancedGroup } from './vistaTreeBatcher';
+import { resolveEffectiveVistaTreeConfig } from '../utils/defaultTreeStyles';
 import { resolveSpeciesConfig } from '../data/canopyEnginePresets';
 import {
   nextAnimationFrame,
@@ -595,7 +598,16 @@ export function applyAtmosphere(
   scene.background = atmo.horizonColor;
   scene.environmentIntensity = atmo.envIntensity;
   syncBotwStyleUniforms(style, atmo, env, cloudDensity, level.sky);
-  syncBotwSceneFog(scene, atmo, env, level.fog, cloudDensity, level.sky, IslandTerrain.waterLevel);
+  syncBotwSceneFog(
+    scene,
+    atmo,
+    env,
+    level.fog,
+    cloudDensity,
+    level.sky,
+    IslandTerrain.waterLevel,
+    level.vistaHeightFog ?? 1
+  );
   if (isWmMode) {
     if (scene.fog instanceof THREE.FogExp2) {
       scene.fog.density *= 0.14;
@@ -1961,8 +1973,10 @@ function buildCastleScene(level: GameLevel, customAssets: CustomAssetMeta[]): Is
   const vistaPreset: VistaPresetId = level.vistaPreset ?? 'alpineValley';
   const hasVistaItems = (level.vistaItems?.length ?? 0) > 0;
   if (vistaPreset !== 'none' || hasVistaItems) {
+    const castleVistaExt = 112 + Math.max(0, level.vistaDistance ?? 0) * 1.38 + 310;
+    const castleSeaSize = Math.max(1150, castleVistaExt * 2.4);
     const castleSea = new THREE.Mesh(
-      new THREE.PlaneGeometry(1150, 1150),
+      new THREE.PlaneGeometry(castleSeaSize, castleSeaSize),
       new THREE.MeshStandardMaterial({
         color: getBiome(level.biome).water,
         roughness: 0.22,
@@ -2682,9 +2696,11 @@ export function buildIslandMesh(
 
   // Animated Water Sea & River Plane with terrain-depth shoreline fade, organic foam & Fresnel sheen
   const atlas = getTerrainTextureAtlas();
+  const baseVistaInner = Math.max(198, isWorldMapMode ? worldRadius + 48 : worldRadius + 38);
+  const vistaExtRadius = baseVistaInner + Math.max(0, level.vistaDistance ?? 0) * 1.38 + 310;
   const oceanPlaneSize = isWorldMapMode
-    ? Math.max(4800, worldRadius * 7.2)
-    : Math.max(1150, worldRadius * 6.5);
+    ? Math.max(4800, worldRadius * 7.2, vistaExtRadius * 2.3)
+    : Math.max(1150, worldRadius * 6.5, vistaExtRadius * 2.4);
   const waterGeo = new THREE.PlaneGeometry(oceanPlaneSize, oceanPlaneSize, 72, 72);
   waterGeo.rotateX(-Math.PI / 2);
   const waterNormal = atlas.waterNormal;
@@ -3048,7 +3064,7 @@ export function buildIslandMesh(
     }
 
     if (hasVista) {
-      const vista = buildDistantVista(level, customAssets, style, 198);
+      const vista = buildDistantVista(level, customAssets, style, baseVistaInner);
       applyBotwStyleToObject(vista, style, { rimStrengthScale: 0.82, shadowLiftScale: 0.85 });
       vistaContainer.add(vista);
     }
@@ -3060,8 +3076,18 @@ export function buildIslandMesh(
   handles.pendingFoliagePromise = (async () => {
     if (deferSignal?.aborted) return;
 
+    const vistaTreeCfgs = (['conifer', 'oak', 'birch'] as const)
+      .map((sp) => resolveEffectiveVistaTreeConfig(level, sp))
+      .filter((c): c is NonNullable<typeof c> => Boolean(c));
+
     // Kick off all custom GLB & texture preloads asynchronously in parallel
-    const texIds = collectReferencedTextureIds(level.sceneryTextures, level.canopyEngine);
+    const texIdSet = new Set(collectReferencedTextureIds(level.sceneryTextures, level.canopyEngine));
+    for (const vCfg of vistaTreeCfgs) {
+      for (const tid of collectReferencedTextureIds(undefined, vCfg)) {
+        texIdSet.add(tid);
+      }
+    }
+    const texIds = Array.from(texIdSet);
     const missingTexIds = texIds.filter((id) => !getRawCustomTextureSync(id));
     const texPreloadPromise =
       missingTexIds.length > 0
@@ -3098,6 +3124,14 @@ export function buildIslandMesh(
         : Promise.resolve([]);
 
     const missingVistaAssets = new Map<string, CustomAssetMeta['category']>();
+    for (const vCfg of vistaTreeCfgs) {
+      for (const id of collectCanopyConfigAssetIds(vCfg)) {
+        if (!getCachedAssetSync(id) && !missingVistaAssets.has(id)) {
+          const meta = customAssets.find((a) => a.id === id);
+          missingVistaAssets.set(id, meta?.category ?? 'scenery');
+        }
+      }
+    }
     for (const vi of level.vistaItems ?? []) {
       if (vi.kind === 'custom' && vi.customAssetId && !getCachedAssetSync(vi.customAssetId)) {
         const meta = customAssets.find((a) => a.id === vi.customAssetId);
@@ -3291,7 +3325,14 @@ export function buildIslandMesh(
       if (options?.onDeferredBatchReady) {
         vistaContainer.visible = false;
       }
-      const vista = buildDistantVista(level, customAssets, style, 198, deferSignal, vistaContainer);
+      const vista = buildDistantVista(
+        level,
+        customAssets,
+        style,
+        baseVistaInner,
+        deferSignal,
+        vistaContainer
+      );
       if (vista instanceof Promise) {
         const built = await vista;
         if (!built || deferSignal?.aborted) {
@@ -4637,14 +4678,6 @@ function buildCavesGroup(
 
     tagCaveId(g, cave.id);
     group.add(g);
-  }
-
-  // Always ensure the primary enterable MountainCave is built on open-world islands
-  if (!builtMainMountainCave) {
-    const mats = resolveCaveMaterialPair(MountainCave.x, MountainCave.z);
-    const mainG = buildMountainCaveInterior(mats.stone, mats.dark, mossMat, mossBrightMat);
-    tagCaveId(mainG, 'cave-mountain-main');
-    group.add(mainG);
   }
 
   return group;
@@ -6210,7 +6243,15 @@ function buildDistantVista(
 ): THREE.Group | Promise<THREE.Group | null> {
   const vistaGroup = new THREE.Group();
   const preset: VistaPresetId = level.vistaPreset ?? 'alpineValley';
-  const density = THREE.MathUtils.clamp(level.vistaDensity ?? 0.85, 0.1, 1);
+  const baseDensity = THREE.MathUtils.clamp(level.vistaDensity ?? 0.85, 0.1, 1.5);
+  const treeDensity = THREE.MathUtils.clamp(level.vistaTreeDensity ?? baseDensity, 0, 1.5);
+  const mountainScale = THREE.MathUtils.clamp(level.vistaMountainScale ?? 1.0, 0, 1.8);
+  const treeScaleMult = THREE.MathUtils.clamp(level.vistaTreeScale ?? 1.0, 0.5, 2.2);
+  const vistaDistOffset = THREE.MathUtils.clamp(level.vistaDistance ?? 0, -40, 280);
+  const effectiveInnerRadius = Math.max(innerRadius < 140 ? 68 : 145, innerRadius + vistaDistOffset);
+  const ringBandSpan = 270 + Math.max(0, vistaDistOffset) * 0.38;
+  const outerRadius = effectiveInnerRadius + ringBandSpan;
+
   const items = level.vistaItems ?? [];
   if (preset === 'none' && items.length === 0) {
     if (targetContainer) targetContainer.add(vistaGroup);
@@ -6219,7 +6260,10 @@ function buildDistantVista(
 
   const biome = getBiome(level.biome);
   const atlas = getTerrainTextureAtlas();
-  const outerRadius = innerRadius + 270;
+
+  const coniferVistaCfg = resolveEffectiveVistaTreeConfig(level, 'conifer');
+  const oakVistaCfg = resolveEffectiveVistaTreeConfig(level, 'oak');
+  const birchVistaCfg = resolveEffectiveVistaTreeConfig(level, 'birch');
 
   const vistaMatCache = new Map<string, THREE.MeshStandardMaterial>();
   const makeVistaMat = (color: string) => {
@@ -6236,6 +6280,7 @@ function buildDistantVista(
     return mat;
   };
   const vistaBotwCache = new Map<THREE.Material, THREE.Material>();
+  const vistaTimeUniform = getSharedBotwUniforms().uTime;
 
   const steps: DeferredStep[] = [];
 
@@ -6264,12 +6309,12 @@ function buildDistantVista(
 
         for (let r = 0; r <= radialSegs; r++) {
           const rt = r / radialSegs;
-          const rad = innerRadius + rt * rt * (outerRadius - innerRadius);
+          const rad = effectiveInnerRadius + rt * rt * (outerRadius - effectiveInnerRadius);
           for (let a = 0; a <= angSegs; a++) {
             const theta = (a / angSegs) * Math.PI * 2;
             const vx = Math.cos(theta) * rad;
             const vz = Math.sin(theta) * rad;
-            const h = evaluateVistaHeight(vx, vz, innerRadius, preset);
+            const h = evaluateVistaHeight(vx, vz, effectiveInnerRadius, preset, mountainScale);
             const vi = r * (angSegs + 1) + a;
             vPos[vi * 3] = vx;
             vPos[vi * 3 + 1] = h;
@@ -6320,23 +6365,29 @@ function buildDistantVista(
           targetContainer.add(vistaGroup);
         }
 
-        const totalSamples = Math.round(720 * density);
-        for (let i = 0; i < totalSamples; i++) {
-          const theta = (i * 2.39996) % (Math.PI * 2);
-          const dist = innerRadius + 16 + ((i * 37.7) % 145);
+        const treeSpan = Math.min(185, ringBandSpan * 0.58);
+        const maxTreeElev = 28 * Math.max(0.85, Math.min(1.3, mountainScale));
+        const totalTreeSamples = treeDensity > 0 ? Math.round(680 * treeDensity) : 0;
+        for (let i = 0; i < totalTreeSamples; i++) {
+          const theta = (i * 2.399963) % (Math.PI * 2);
+          const dist = effectiveInnerRadius + 16 + ((i * 37.7) % treeSpan);
           const vx = Math.cos(theta) * dist;
           const vz = Math.sin(theta) * dist;
-          const y = evaluateVistaHeight(vx, vz, innerRadius, preset);
-          if (y < IslandTerrain.waterLevel + 0.65 || y > 28) continue;
+          const y = evaluateVistaHeight(vx, vz, effectiveInnerRadius, preset, mountainScale);
+          if (y < IslandTerrain.waterLevel + 0.65 || y > maxTreeElev) continue;
 
-          const yIn = evaluateVistaHeight(vx - Math.cos(theta) * 2.2, vz - Math.sin(theta) * 2.2, innerRadius, preset);
+          const yIn = evaluateVistaHeight(
+            vx - Math.cos(theta) * 2.2,
+            vz - Math.sin(theta) * 2.2,
+            effectiveInnerRadius,
+            preset,
+            mountainScale
+          );
           const baseY = Math.min(y, yIn) - 0.35;
           const rot = (i * 1.13) % (Math.PI * 2);
           const scale = 1.65 + (i % 5) * 0.35;
 
-          if (i % 5 === 0) {
-            rockPts.push({ x: vx, y: baseY, z: vz, s: scale * 1.25, rot });
-          } else if (i % 3 === 0) {
+          if (i % 3 === 0) {
             pinePts.push({ x: vx, y: baseY, z: vz, s: scale * 1.15, rot });
           } else if (i % 3 === 1) {
             oakPts.push({ x: vx, y: baseY, z: vz, s: scale * 1.1, rot });
@@ -6344,13 +6395,36 @@ function buildDistantVista(
             birchPts.push({ x: vx, y: baseY, z: vz, s: scale * 1.05, rot });
           }
         }
+
+        const rockSampleCount =
+          mountainScale > 0.05
+            ? Math.round(145 * Math.max(0.15, Math.min(1.4, baseDensity * Math.max(0.35, mountainScale))))
+            : 0;
+        for (let i = 0; i < rockSampleCount; i++) {
+          const theta = (i * 2.399963 + 0.85) % (Math.PI * 2);
+          const dist = effectiveInnerRadius + 18 + ((i * 53.3) % treeSpan);
+          const vx = Math.cos(theta) * dist;
+          const vz = Math.sin(theta) * dist;
+          const y = evaluateVistaHeight(vx, vz, effectiveInnerRadius, preset, mountainScale);
+          if (y < IslandTerrain.waterLevel + 0.65 || y > maxTreeElev + 6) continue;
+          const yIn = evaluateVistaHeight(
+            vx - Math.cos(theta) * 2.2,
+            vz - Math.sin(theta) * 2.2,
+            effectiveInnerRadius,
+            preset,
+            mountainScale
+          );
+          const baseY = Math.min(y, yIn) - 0.35;
+          const rot = (i * 1.71) % (Math.PI * 2);
+          const scale = 1.65 + (i % 5) * 0.35;
+          rockPts.push({ x: vx, y: baseY, z: vz, s: scale * 1.25, rot });
+        }
       },
     });
 
     const dummy = new THREE.Object3D();
     const tint = new THREE.Color();
     const whiteTint = new THREE.Color('#FFFFFF');
-    const vistaTimeUniform = getSharedBotwUniforms().uTime;
 
     const makeVistaBatchMat = (color: string, map?: THREE.Texture, roughness = 0.86, diffuseRoughness = 0.82) =>
       createScatterBatchMaterialInstance({
@@ -6366,17 +6440,30 @@ function buildDistantVista(
       label: 'vistaPines',
       run: () => {
         if (pinePts.length === 0) return;
+        const pineBase = new THREE.Color(biome.detail).lerp(new THREE.Color('#3F8D3B'), 0.68);
+        if (coniferVistaCfg) {
+          const grp = buildVistaTreeSpeciesInstancedGroup({
+            config: coniferVistaCfg,
+            speciesKey: 'conifer',
+            style,
+            placements: pinePts,
+            treeScaleMultiplier: treeScaleMult,
+            fallbackBaseColor: `#${pineBase.getHexString()}`,
+            sceneryTextures: level.sceneryTextures,
+          });
+          vistaGroup.add(grp);
+          return;
+        }
         const pTrunk = new THREE.CylinderGeometry(0.18, 0.38, 2.5, 9);
         pTrunk.translate(0, 0.92, 0);
         const pCone = createDetailedPineTierGeometry(1.82, 4.4, 9, 2);
         pCone.translate(0, 3.35, 0);
         const trunkEntries: BatchInstanceSpec[] = [];
         const crownEntries: BatchInstanceSpec[] = [];
-        const pineBase = new THREE.Color(biome.detail).lerp(new THREE.Color('#3F8D3B'), 0.68);
         pinePts.forEach((p, idx) => {
           dummy.position.set(p.x, p.y, p.z);
           dummy.rotation.set(0, p.rot, 0);
-          dummy.scale.setScalar(p.s);
+          dummy.scale.setScalar(p.s * treeScaleMult);
           dummy.updateMatrix();
           const mat4 = dummy.matrix.clone();
           trunkEntries.push({ geoIndex: 0, matrix: mat4, color: whiteTint });
@@ -6405,17 +6492,30 @@ function buildDistantVista(
       label: 'vistaOaks',
       run: () => {
         if (oakPts.length === 0) return;
+        const oakBase = new THREE.Color(biome.ground).lerp(new THREE.Color('#4E9A3F'), 0.6);
+        if (oakVistaCfg) {
+          const grp = buildVistaTreeSpeciesInstancedGroup({
+            config: oakVistaCfg,
+            speciesKey: 'oak',
+            style,
+            placements: oakPts,
+            treeScaleMultiplier: treeScaleMult,
+            fallbackBaseColor: `#${oakBase.getHexString()}`,
+            sceneryTextures: level.sceneryTextures,
+          });
+          vistaGroup.add(grp);
+          return;
+        }
         const oTrunk = new THREE.CylinderGeometry(0.26, 0.45, 2.3, 9);
         oTrunk.translate(0, 0.9, 0);
         const oCrown = createSculptedCanopyLobeGeometry(1.58, 1.2, 0.95, 1.15, 2.4, 12, 9, 2.4, 1.7);
         oCrown.translate(0, 2.95, 0);
         const trunkEntries: BatchInstanceSpec[] = [];
         const crownEntries: BatchInstanceSpec[] = [];
-        const oakBase = new THREE.Color(biome.ground).lerp(new THREE.Color('#4E9A3F'), 0.6);
         oakPts.forEach((p, idx) => {
           dummy.position.set(p.x, p.y, p.z);
           dummy.rotation.set(0, p.rot, 0);
-          dummy.scale.setScalar(p.s);
+          dummy.scale.setScalar(p.s * treeScaleMult);
           dummy.updateMatrix();
           const mat4 = dummy.matrix.clone();
           trunkEntries.push({ geoIndex: 0, matrix: mat4, color: whiteTint });
@@ -6444,38 +6544,51 @@ function buildDistantVista(
       label: 'vistaBirchAndRocks',
       run: () => {
         if (birchPts.length > 0) {
-          const bTrunk = new THREE.CylinderGeometry(0.13, 0.24, 3.0, 9);
-          bTrunk.translate(0, 1.2, 0);
-          const bCrown = createSculptedCanopyLobeGeometry(1.16, 0.95, 1.32, 0.95, 4.2, 12, 9, 2.4, 1.8);
-          bCrown.translate(0, 3.35, 0);
-          const trunkEntries: BatchInstanceSpec[] = [];
-          const crownEntries: BatchInstanceSpec[] = [];
           const birchBase = new THREE.Color(biome.ground).lerp(new THREE.Color('#80CF4C'), 0.62);
-          birchPts.forEach((p, idx) => {
-            dummy.position.set(p.x, p.y, p.z);
-            dummy.rotation.set(0, p.rot, 0);
-            dummy.scale.setScalar(p.s);
-            dummy.updateMatrix();
-            const mat4 = dummy.matrix.clone();
-            trunkEntries.push({ geoIndex: 0, matrix: mat4, color: whiteTint });
-            crownEntries.push({
-              geoIndex: 0,
-              matrix: mat4,
-              color: tint.copy(birchBase).offsetHSL(0, 0, ((idx % 3) - 1) * 0.05).clone(),
+          if (birchVistaCfg) {
+            const grp = buildVistaTreeSpeciesInstancedGroup({
+              config: birchVistaCfg,
+              speciesKey: 'birch',
+              style,
+              placements: birchPts,
+              treeScaleMultiplier: treeScaleMult,
+              fallbackBaseColor: `#${birchBase.getHexString()}`,
+              sceneryTextures: level.sceneryTextures,
             });
-          });
-          vistaGroup.add(
-            buildBatchedGeometryInstances({
-              geometries: [normalizeGeometryForBatch(bTrunk, 0, 0)],
-              material: makeVistaBatchMat('#FFFFFF', atlas.birchBark, 0.82, 0.86),
-              entries: trunkEntries,
-            }).batchedMesh,
-            buildBatchedGeometryInstances({
-              geometries: [normalizeGeometryForBatch(bCrown, 0, 0)],
-              material: makeVistaBatchMat('#FFFFFF', atlas.birchLeaves, 0.82, 0.45),
-              entries: crownEntries,
-            }).batchedMesh
-          );
+            vistaGroup.add(grp);
+          } else {
+            const bTrunk = new THREE.CylinderGeometry(0.13, 0.24, 3.0, 9);
+            bTrunk.translate(0, 1.2, 0);
+            const bCrown = createSculptedCanopyLobeGeometry(1.16, 0.95, 1.32, 0.95, 4.2, 12, 9, 2.4, 1.8);
+            bCrown.translate(0, 3.35, 0);
+            const trunkEntries: BatchInstanceSpec[] = [];
+            const crownEntries: BatchInstanceSpec[] = [];
+            birchPts.forEach((p, idx) => {
+              dummy.position.set(p.x, p.y, p.z);
+              dummy.rotation.set(0, p.rot, 0);
+              dummy.scale.setScalar(p.s * treeScaleMult);
+              dummy.updateMatrix();
+              const mat4 = dummy.matrix.clone();
+              trunkEntries.push({ geoIndex: 0, matrix: mat4, color: whiteTint });
+              crownEntries.push({
+                geoIndex: 0,
+                matrix: mat4,
+                color: tint.copy(birchBase).offsetHSL(0, 0, ((idx % 3) - 1) * 0.05).clone(),
+              });
+            });
+            vistaGroup.add(
+              buildBatchedGeometryInstances({
+                geometries: [normalizeGeometryForBatch(bTrunk, 0, 0)],
+                material: makeVistaBatchMat('#FFFFFF', atlas.birchBark, 0.82, 0.86),
+                entries: trunkEntries,
+              }).batchedMesh,
+              buildBatchedGeometryInstances({
+                geometries: [normalizeGeometryForBatch(bCrown, 0, 0)],
+                material: makeVistaBatchMat('#FFFFFF', atlas.birchLeaves, 0.82, 0.45),
+                entries: crownEntries,
+              }).batchedMesh
+            );
+          }
         }
 
         if (rockPts.length > 0) {
@@ -6510,10 +6623,10 @@ function buildDistantVista(
       run: () => {
         for (const item of items) {
           const rad = (item.angle * Math.PI) / 180;
-          const dist = Math.max(innerRadius + 8, Math.min(outerRadius - 20, item.distance));
+          const dist = Math.max(effectiveInnerRadius + 8, Math.min(outerRadius - 20, item.distance));
           const vx = Math.cos(rad) * dist;
           const vz = Math.sin(rad) * dist;
-          const terrainY = evaluateVistaHeight(vx, vz, innerRadius, preset);
+          const terrainY = evaluateVistaHeight(vx, vz, effectiveInnerRadius, preset, mountainScale);
           const needsIslet = terrainY < IslandTerrain.waterLevel + 0.3;
           const baseY = needsIslet ? IslandTerrain.waterLevel + 0.35 : terrainY - 0.3;
 
@@ -6581,50 +6694,100 @@ function buildDistantVista(
             sideWall.position.set(4.5, 3.1, 0);
             itemGroup.add(keep, spire, sideWall);
           } else {
-            const trunkMap =
+            const activeClusterCfg =
               item.kind === 'birchCluster'
-                ? atlas.birchBark
+                ? birchVistaCfg
                 : item.kind === 'oakCluster'
-                ? atlas.oakBark
-                : atlas.pineBark;
-            const crownMap =
-              item.kind === 'pineCluster'
-                ? atlas.pineLeaves
-                : item.kind === 'oakCluster'
-                ? atlas.oakLeaves
-                : atlas.birchLeaves;
-            const crownColor =
-              item.kind === 'pineCluster'
-                ? '#4D9E3E'
-                : item.kind === 'oakCluster'
-                ? '#52A441'
-                : '#80CF4C';
-            const tKey = `${item.kind}:trunk`;
-            let tMat = vistaMatCache.get(tKey);
-            if (!tMat) {
-              tMat = new THREE.MeshStandardMaterial({ color: '#FFFFFF', map: trunkMap, roughness: 0.88 });
-              vistaMatCache.set(tKey, tMat);
-            }
-            const cKey = `${item.kind}:crown:${crownColor}`;
-            let cMat = vistaMatCache.get(cKey);
-            if (!cMat) {
-              cMat = new THREE.MeshStandardMaterial({ color: crownColor, map: crownMap, roughness: 0.82 });
-              vistaMatCache.set(cKey, cMat);
-            }
-            for (const [tx, tz, ts] of [
-              [0, 0, 1.25],
-              [-3.2, 1.4, 0.95],
-              [3.0, -1.2, 1.05],
-              [1.1, 2.9, 0.85],
-            ]) {
-              const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.32 * ts, 0.52 * ts, 3.6 * ts, 10), tMat);
-              trunk.position.set(tx, 1.5 * ts, tz);
-              const crown =
+                ? oakVistaCfg
+                : coniferVistaCfg;
+            if (activeClusterCfg) {
+              const fallbackClusterColor =
                 item.kind === 'pineCluster'
-                  ? new THREE.Mesh(createDetailedPineTierGeometry(2.5 * ts, 6.4 * ts, 9, 3), cMat)
-                  : new THREE.Mesh(createSculptedCanopyLobeGeometry(2.4 * ts, 1.15, 0.95, 1.1, 2.2, 12, 9, 2.4, 1.8), cMat);
-              crown.position.set(tx, (item.kind === 'pineCluster' ? 5.1 : 4.2) * ts, tz);
-              itemGroup.add(trunk, crown);
+                  ? '#4D9E3E'
+                  : item.kind === 'oakCluster'
+                  ? '#52A441'
+                  : '#80CF4C';
+              const clusterOffsets: [number, number, number, number][] = [
+                [0, 0, 1.25, 0.25],
+                [-3.2, 1.4, 0.95, 1.8],
+                [3.0, -1.2, 1.05, 3.5],
+                [1.1, 2.9, 0.85, 5.1],
+              ];
+              for (const [idx, [tx, tz, ts, rotY]] of clusterOffsets.entries()) {
+                const treeGrp = buildSingleCanopyTreeGroup(
+                  activeClusterCfg,
+                  `vista_lm_${item.id}_${idx}`,
+                  style,
+                  vistaTimeUniform,
+                  fallbackClusterColor,
+                  { sceneryTextures: level.sceneryTextures, detail: 'forest' }
+                );
+                treeGrp.position.set(tx, 0, tz);
+                treeGrp.rotation.y = rotY;
+                treeGrp.scale.setScalar(ts * 1.15 * treeScaleMult);
+                treeGrp.traverse((ch) => {
+                  if ((ch as THREE.Mesh).isMesh) {
+                    ch.castShadow = false;
+                    ch.receiveShadow = false;
+                  }
+                });
+                itemGroup.add(treeGrp);
+              }
+            } else {
+              const trunkMap =
+                item.kind === 'birchCluster'
+                  ? atlas.birchBark
+                  : item.kind === 'oakCluster'
+                  ? atlas.oakBark
+                  : atlas.pineBark;
+              const crownMap =
+                item.kind === 'pineCluster'
+                  ? atlas.pineLeaves
+                  : item.kind === 'oakCluster'
+                  ? atlas.oakLeaves
+                  : atlas.birchLeaves;
+              const crownColor =
+                item.kind === 'pineCluster'
+                  ? '#4D9E3E'
+                  : item.kind === 'oakCluster'
+                  ? '#52A441'
+                  : '#80CF4C';
+              const tKey = `${item.kind}:trunk`;
+              let tMat = vistaMatCache.get(tKey);
+              if (!tMat) {
+                tMat = new THREE.MeshStandardMaterial({ color: '#FFFFFF', map: trunkMap, roughness: 0.88 });
+                vistaMatCache.set(tKey, tMat);
+              }
+              const cKey = `${item.kind}:crown:${crownColor}`;
+              let cMat = vistaMatCache.get(cKey);
+              if (!cMat) {
+                cMat = new THREE.MeshStandardMaterial({ color: crownColor, map: crownMap, roughness: 0.82 });
+                vistaMatCache.set(cKey, cMat);
+              }
+              for (const [tx, tz, ts] of [
+                [0, 0, 1.25],
+                [-3.2, 1.4, 0.95],
+                [3.0, -1.2, 1.05],
+                [1.1, 2.9, 0.85],
+              ]) {
+                const trunk = new THREE.Mesh(
+                  new THREE.CylinderGeometry(0.32 * ts * treeScaleMult, 0.52 * ts * treeScaleMult, 3.6 * ts * treeScaleMult, 10),
+                  tMat
+                );
+                trunk.position.set(tx, 1.5 * ts * treeScaleMult, tz);
+                const crown =
+                  item.kind === 'pineCluster'
+                    ? new THREE.Mesh(
+                        createDetailedPineTierGeometry(2.5 * ts * treeScaleMult, 6.4 * ts * treeScaleMult, 9, 3),
+                        cMat
+                      )
+                    : new THREE.Mesh(
+                        createSculptedCanopyLobeGeometry(2.4 * ts * treeScaleMult, 1.15, 0.95, 1.1, 2.2, 12, 9, 2.4, 1.8),
+                        cMat
+                      );
+                crown.position.set(tx, (item.kind === 'pineCluster' ? 5.1 : 4.2) * ts * treeScaleMult, tz);
+                itemGroup.add(trunk, crown);
+              }
             }
           }
 

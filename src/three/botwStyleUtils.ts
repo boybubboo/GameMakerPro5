@@ -167,7 +167,8 @@ export function syncBotwSceneFog(
   fogSlider: number,
   cloudDensity: number,
   skyId: string,
-  waterLevel = -1.65
+  waterLevel = -1.65,
+  vistaHeightFog = 1.0
 ): number {
   const baseFog = env === 'dungeon' ? 0.015 : skyId === 'golden' ? 0.00135 : 0.00072;
   const fogDensity = baseFog + fogSlider * 0.0052;
@@ -212,16 +213,17 @@ export function syncBotwSceneFog(
   fogU.uSunDir.value.copy(_tmpSunDir);
   fogU.uSunInscatterColor.value.copy(_tmpWarmFog);
 
+  const mistScale = THREE.MathUtils.clamp(vistaHeightFog, 0, 2.5);
   const isOutdoor = env === 'openWorld' || env === 'castle' || env === 'sideScroller';
   if (!isOutdoor) {
     fogU.uHeightFogDensity.value = 0.0;
     fogU.uSunInscatterStrength.value = 0.0;
   } else {
     const mistBoost = skyId === 'mist' ? 1.75 : skyId === 'golden' ? 1.3 : 1.0;
-    const valleyBase = 0.00055 + fogSlider * 0.0018 + cloudDensity * 0.0004;
+    const valleyBase = (0.00055 + fogSlider * 0.0018 + cloudDensity * 0.0004) * mistScale;
     fogU.uHeightFogDensity.value =
       env === 'openWorld' ? valleyBase * mistBoost * (1.0 - atmo.nightFactor * 0.4) : valleyBase * 0.35;
-    fogU.uHeightFogLevel.value = waterLevel + 3.6 + fogSlider * 2.2;
+    fogU.uHeightFogLevel.value = waterLevel + 3.6 + fogSlider * 2.2 + Math.max(0, mistScale - 1) * 4.5;
     fogU.uSunInscatterStrength.value =
       (0.32 + atmo.warmGlow * 0.38) * (1.0 - atmo.nightFactor * 0.85);
   }

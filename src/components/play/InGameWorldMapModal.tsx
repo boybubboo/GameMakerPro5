@@ -9,6 +9,7 @@ import {
   IslandTerrain,
   levelBoardToWorld,
   MountainCave,
+  terrainHasMainMountainCave,
   TerrainPaths,
 } from '../../utils/terrain';
 import { getWorldMapRadius } from '../../utils/worldMap';
@@ -237,34 +238,68 @@ export const InGameWorldMapModal: React.FC<InGameWorldMapModalProps> = ({
         cctx.strokeStyle = '#DFC78B';
         cctx.stroke();
 
-        // River & trail
-        cctx.beginPath();
-        IslandRiver.samples.forEach((s, idx) => {
-          const [px, py] = toPx(s.x, s.z);
-          if (idx === 0) cctx.moveTo(px, py);
-          else cctx.lineTo(px, py);
-        });
-        cctx.strokeStyle = '#2B8CE6';
-        cctx.lineWidth = 10;
-        cctx.lineCap = 'round';
-        cctx.stroke();
+        const isFreeform = Boolean(currentLevel.terrain?.freeformWorld);
+        if (!isFreeform) {
+          // Legacy template island river & trail
+          cctx.beginPath();
+          IslandRiver.samples.forEach((s, idx) => {
+            const [px, py] = toPx(s.x, s.z);
+            if (idx === 0) cctx.moveTo(px, py);
+            else cctx.lineTo(px, py);
+          });
+          cctx.strokeStyle = '#2B8CE6';
+          cctx.lineWidth = 10;
+          cctx.lineCap = 'round';
+          cctx.stroke();
 
-        cctx.beginPath();
-        TerrainPaths.samples.forEach((s, idx) => {
-          const [px, py] = toPx(s.x, s.z);
-          if (idx === 0) cctx.moveTo(px, py);
-          else cctx.lineTo(px, py);
-        });
-        cctx.strokeStyle = '#C9A26B';
-        cctx.lineWidth = 6;
-        cctx.lineCap = 'round';
-        cctx.stroke();
+          cctx.beginPath();
+          TerrainPaths.samples.forEach((s, idx) => {
+            const [px, py] = toPx(s.x, s.z);
+            if (idx === 0) cctx.moveTo(px, py);
+            else cctx.lineTo(px, py);
+          });
+          cctx.strokeStyle = '#C9A26B';
+          cctx.lineWidth = 6;
+          cctx.lineCap = 'round';
+          cctx.stroke();
+        } else {
+          for (const wb of currentLevel.terrain?.waterBodies ?? []) {
+            const [cx, cz] = toPx(wb.center[0], wb.center[1]);
+            const rx = (wb.radiusX / (2 * mapRadius)) * CANVAS_RES;
+            const rz = (wb.radiusZ / (2 * mapRadius)) * CANVAS_RES;
+            cctx.save();
+            cctx.translate(cx, cz);
+            cctx.beginPath();
+            cctx.ellipse(0, 0, Math.max(4, rx), Math.max(4, rz), 0, 0, Math.PI * 2);
+            cctx.fillStyle = '#2B8CE6';
+            cctx.fill();
+            cctx.restore();
+          }
+          for (const rd of currentLevel.terrain?.roads ?? []) {
+            if (!rd.points || rd.points.length < 2) continue;
+            cctx.save();
+            cctx.beginPath();
+            rd.points.forEach((pt, idx) => {
+              const [rx, rz] = toPx(pt[0], pt[1]);
+              if (idx === 0) cctx.moveTo(rx, rz);
+              else cctx.lineTo(rx, rz);
+            });
+            cctx.strokeStyle = '#C9A26B';
+            cctx.lineWidth = Math.max(3, (rd.width / (2 * mapRadius)) * CANVAS_RES);
+            cctx.lineCap = 'round';
+            cctx.lineJoin = 'round';
+            cctx.stroke();
+            cctx.restore();
+          }
+        }
 
-        const [caveX, caveZ] = toPx(MountainCave.x, MountainCave.z);
-        cctx.beginPath();
-        cctx.arc(caveX, caveZ, 12, 0, Math.PI * 2);
-        cctx.fillStyle = '#334155';
-        cctx.fill();
+        if (terrainHasMainMountainCave(currentLevel.terrain)) {
+          const [caveX, caveZ] = toPx(MountainCave.x, MountainCave.z);
+          cctx.beginPath();
+          cctx.arc(caveX, caveZ, 12, 0, Math.PI * 2);
+          cctx.fillStyle = '#334155';
+          cctx.fill();
+        }
       } else if (env === 'dungeon') {
         cctx.fillStyle = '#131620';
         cctx.fillRect(0, 0, CANVAS_RES, CANVAS_RES);

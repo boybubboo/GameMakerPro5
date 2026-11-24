@@ -75,6 +75,7 @@ import type {
   TerrainBrushFalloff,
   TerrainBrushOptions,
   TerrainData,
+  TreeSpeciesType,
   VertexPaintStroke,
   ViewportResolutionScale,
   ViewportShadowQuality,
@@ -137,6 +138,10 @@ export function subscribeLivePlayerTelemetry(listener: LiveTelemetryListener): (
   };
 }
 import { createDefaultCanopyConfig } from '../data/canopyEnginePresets';
+import {
+  buildCanopyConfigFromUserDefaults,
+  hasCustomDefaultTreeStyles,
+} from '../utils/defaultTreeStyles';
 import {
   arrayBufferToBase64,
   base64ToArrayBuffer,
@@ -362,7 +367,12 @@ function loadInitialProjects(): GameProject[] {
                   terrain: smoothOrganicMossLayers(nextLvl.terrain),
                 };
               }
-              if (shouldMountainCave && env === 'openWorld' && nextLvl.terrain) {
+              if (
+                shouldMountainCave &&
+                env === 'openWorld' &&
+                nextLvl.terrain &&
+                !nextLvl.terrain.freeformWorld
+              ) {
                 nextLvl = {
                   ...nextLvl,
                   terrain: applyMountainCaveToTerrain(nextLvl.terrain),
@@ -553,6 +563,7 @@ export function useMakerStore() {
   const [characterMakerTargetAssetId, setCharacterMakerTargetAssetId] = useState<string | null>(null);
   const [treeMakerOpen, setTreeMakerOpen] = useState(false);
   const [treeMakerTargetAssetId, setTreeMakerTargetAssetId] = useState<string | null>(null);
+  const [treeMakerInitialSpecies, setTreeMakerInitialSpecies] = useState<TreeSpeciesType | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [playModalOpen, setPlayModalOpen] = useState(false);
   const [playFromPoint, setPlayFromPoint] = useState<BoardPoint | null>(null);
@@ -1170,8 +1181,13 @@ export function useMakerStore() {
         'sculpt terrain',
         (lvl) => {
           const base = lvl.terrain ?? createInitialTerrain();
+          const shouldAttachDefaults =
+            brush === 'scatterTree' && !lvl.canopyEngine && hasCustomDefaultTreeStyles();
           return {
             ...lvl,
+            ...(shouldAttachDefaults
+              ? { canopyEngine: buildCanopyConfigFromUserDefaults(undefined) }
+              : {}),
             terrain: applyTerrainBrush(base, brush, x, z, radius, customAssetId, options),
           };
         },
@@ -1420,8 +1436,15 @@ export function useMakerStore() {
         `2D paint ${brushId}`,
         (lvl) => {
           const base = lvl.terrain ?? createInitialTerrain();
+          const shouldAttachDefaults =
+            (brushId === 'coniferWoods' || brushId === 'deciduousWoods') &&
+            !lvl.canopyEngine &&
+            hasCustomDefaultTreeStyles();
           return {
             ...lvl,
+            ...(shouldAttachDefaults
+              ? { canopyEngine: buildCanopyConfigFromUserDefaults(undefined) }
+              : {}),
             terrain: apply2DOverviewBrushStroke(
               base,
               brushId,
@@ -1482,6 +1505,9 @@ export function useMakerStore() {
         targetLevel = {
           ...firstOpenLvl,
           name,
+          canopyEngine: firstOpenLvl.canopyEngine?.enabled
+            ? firstOpenLvl.canopyEngine
+            : buildCanopyConfigFromUserDefaults(firstOpenLvl.canopyEngine),
           terrain: syncLevelTerrainWithWorldMap(cleanBaseTerrain, baseWm, nextCode),
         };
       } else {
@@ -2142,6 +2168,41 @@ export function useMakerStore() {
       });
     },
     [updateLevel]
+  );
+
+  const applyDefaultTreeStylesToLevels = useCallback(
+    (scope: 'current' | 'all' = 'current') => {
+      if (!currentProject) return;
+      if (scope === 'current') {
+        updateLevel(
+          'apply default tree styles',
+          (lvl) => ({
+            ...lvl,
+            canopyEngine: buildCanopyConfigFromUserDefaults(lvl.canopyEngine, {
+              forceEnable: true,
+              ignoreAutoApplyFlag: true,
+            }),
+          }),
+          true
+        );
+        return;
+      }
+      updateProject(
+        'apply default tree styles across all lands',
+        (proj) => ({
+          ...proj,
+          levels: proj.levels.map((lvl) => ({
+            ...lvl,
+            canopyEngine: buildCanopyConfigFromUserDefaults(lvl.canopyEngine, {
+              forceEnable: true,
+              ignoreAutoApplyFlag: true,
+            }),
+          })),
+        }),
+        true
+      );
+    },
+    [currentProject, updateLevel, updateProject]
   );
 
   const addMechanicalEntityToLevel = useCallback(
@@ -2982,6 +3043,12 @@ export function useMakerStore() {
           wind: lvl.wind,
           visualStyle: lvl.visualStyle,
           vistaPreset: lvl.vistaPreset,
+          vistaDensity: lvl.vistaDensity,
+          vistaTreeDensity: lvl.vistaTreeDensity,
+          vistaMountainScale: lvl.vistaMountainScale,
+          vistaDistance: lvl.vistaDistance,
+          vistaTreeScale: lvl.vistaTreeScale,
+          vistaHeightFog: lvl.vistaHeightFog,
           postProcessing: currentProject.postProcessing
             ? JSON.parse(JSON.stringify(currentProject.postProcessing))
             : undefined,
@@ -3158,6 +3225,12 @@ export function useMakerStore() {
                       wind: atmo.wind,
                       visualStyle: atmo.visualStyle ?? l.visualStyle,
                       vistaPreset: atmo.vistaPreset ?? l.vistaPreset,
+                      vistaDensity: atmo.vistaDensity ?? l.vistaDensity,
+                      vistaTreeDensity: atmo.vistaTreeDensity ?? l.vistaTreeDensity,
+                      vistaMountainScale: atmo.vistaMountainScale ?? l.vistaMountainScale,
+                      vistaDistance: atmo.vistaDistance ?? l.vistaDistance,
+                      vistaTreeScale: atmo.vistaTreeScale ?? l.vistaTreeScale,
+                      vistaHeightFog: atmo.vistaHeightFog ?? l.vistaHeightFog,
                     }
                   : l
               ),
@@ -3584,8 +3657,11 @@ export function useMakerStore() {
     setTreeMakerOpen,
     treeMakerTargetAssetId,
     setTreeMakerTargetAssetId,
-    openTreeMaker: (assetId?: string) => {
+    treeMakerInitialSpecies,
+    setTreeMakerInitialSpecies,
+    openTreeMaker: (assetId?: string, initialSpecies?: TreeSpeciesType) => {
       setTreeMakerTargetAssetId(assetId ?? null);
+      setTreeMakerInitialSpecies(initialSpecies ?? null);
       setShowingAssetVault(false);
       setObjectMakerOpen(false);
       setPlantMakerOpen(false);
@@ -3629,6 +3705,7 @@ export function useMakerStore() {
     addFxTemplateAtPoint,
     addCanopyTreeEntity,
     scatterCanopyGrove,
+    applyDefaultTreeStylesToLevels,
     addMechanicalEntityToLevel,
     updateEntity,
     moveEntity,

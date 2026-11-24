@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Clock, CloudSun, Film, Mountain, Sun, Trash2, Wind, X } from 'lucide-react';
+import { Clock, CloudFog, CloudSun, Film, Mountain, Sun, Trash2, Trees, Wind, X } from 'lucide-react';
 import {
   Biomes,
   SkyPresets,
@@ -10,6 +10,7 @@ import {
 } from '../../data/registries';
 import type { MakerStore } from '../../store/useMakerStore';
 import type { VistaPresetId, VistaPropItem, VistaPropKind } from '../../types/maker';
+import { useDefaultTreeStyles } from '../../utils/defaultTreeStyles';
 import { getEnvironmentType, uid } from '../../utils/terrain';
 import { MakerIcon } from '../shared/IconMap';
 import { FieldLabel } from '../shared/MakerUI';
@@ -23,6 +24,7 @@ function formatClock(hour: number): string {
 
 export const AtmosphereDrawer: React.FC<{ store: MakerStore }> = ({ store }) => {
   const { currentLevel } = store;
+  const defaultTreePrefs = useDefaultTreeStyles();
   const [vistaCustomAssetId, setVistaCustomAssetId] = useState<string>(
     () => store.customAssets[0]?.id ?? ''
   );
@@ -51,10 +53,21 @@ export const AtmosphereDrawer: React.FC<{ store: MakerStore }> = ({ store }) => 
       ? 15.0
       : 12.2;
   const vistaPreset: VistaPresetId = currentLevel.vistaPreset ?? 'alpineValley';
-  const vistaDensity = currentLevel.vistaDensity ?? 0.65;
+  const vistaDensity = currentLevel.vistaDensity ?? 0.85;
+  const vistaTreeDensity = currentLevel.vistaTreeDensity ?? vistaDensity;
+  const vistaMountainScale = currentLevel.vistaMountainScale ?? 1.0;
+  const vistaDistance = currentLevel.vistaDistance ?? 0;
+  const vistaTreeScale = currentLevel.vistaTreeScale ?? 1.0;
+  const vistaHeightFog = currentLevel.vistaHeightFog ?? 1.0;
+  const distanceFog = currentLevel.fog ?? 0.25;
   const vistaItems = currentLevel.vistaItems ?? [];
-  const vistaMinDist = envType === 'castle' ? 68 : 185;
-  const vistaMaxDist = envType === 'castle' ? 195 : 390;
+  const vistaMinDist = Math.max(
+    envType === 'castle' ? 68 : 155,
+    (envType === 'castle' ? 68 : 198) + vistaDistance + 8
+  );
+  const vistaMaxDist =
+    (envType === 'castle' ? 195 : 440) + Math.max(0, vistaDistance) * 1.38;
+  const hasSavedDefaultTrees = Object.keys(defaultTreePrefs.species).length > 0;
 
   const handleAddVistaItem = (kind: VistaPropKind, customAssetId?: string, customLabel?: string) => {
     const labelMap: Record<VistaPropKind, string> = {
@@ -75,9 +88,9 @@ export const AtmosphereDrawer: React.FC<{ store: MakerStore }> = ({ store }) => 
       name: labelMap[kind],
       angle: Math.round((vistaItems.length * 47 + 28) % 360),
       distance:
-        envType === 'castle'
+        (envType === 'castle'
           ? 92 + (vistaItems.length % 4) * 18
-          : 225 + (vistaItems.length % 4) * 32,
+          : 225 + (vistaItems.length % 4) * 32) + Math.max(0, vistaDistance),
       scale: kind === 'mountain' || kind === 'castleRuins' ? 1.45 : 1.15,
       customAssetId,
     };
@@ -347,13 +360,89 @@ export const AtmosphereDrawer: React.FC<{ store: MakerStore }> = ({ store }) => 
           {/* Post Processing Quick Controls */}
           <PostProcessingPanel store={store} />
 
+          {/* Distance Fog & Atmospheric Haze */}
+          <div className="space-y-2.5 p-3 rounded-2xl bg-slate-100 dark:bg-[#1F2430] border border-slate-200/70 dark:border-white/[0.06]">
+            <div className="flex items-center justify-between">
+              <FieldLabel text="Distance Fog & Horizon Haze" />
+              <CloudFog size={13} className="text-[#38BDF8]" />
+            </div>
+            <div className="space-y-1">
+              <div className="flex justify-between text-[11px] font-semibold">
+                <span>Distance fog depth</span>
+                <span className="tabular-nums text-slate-500 dark:text-[#949BB0]">
+                  {Math.round(distanceFog * 100)}%
+                </span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.02}
+                value={distanceFog}
+                onChange={(e) =>
+                  store.updateLevel(
+                    'adjust distance fog',
+                    (lvl) => ({ ...lvl, fog: Number(e.target.value) }),
+                    false
+                  )
+                }
+                className="w-full accent-[#38BDF8]"
+              />
+            </div>
+            <div className="space-y-1">
+              <div className="flex justify-between text-[11px] font-semibold">
+                <span>Valley &amp; horizon mist</span>
+                <span className="tabular-nums text-slate-500 dark:text-[#949BB0]">
+                  {Math.round(vistaHeightFog * 100)}%
+                </span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={2}
+                step={0.05}
+                value={vistaHeightFog}
+                onChange={(e) =>
+                  store.updateLevel(
+                    'adjust horizon valley mist',
+                    (lvl) => ({ ...lvl, vistaHeightFog: Number(e.target.value) }),
+                    false
+                  )
+                }
+                className="w-full accent-[#38BDF8]"
+              />
+            </div>
+          </div>
+
           {/* Distant Vista */}
           {(envType === 'openWorld' || envType === 'castle') && (
             <div className="space-y-2.5 p-3 rounded-2xl bg-slate-100 dark:bg-[#1F2430] border border-slate-200/70 dark:border-white/[0.06]">
-              <div className="flex items-center justify-between">
-                <FieldLabel text="Distant Horizon Vista" />
+              <div className="flex items-center justify-between gap-2">
+                <FieldLabel text="360° Distant Horizon Vista" />
                 <Mountain size={12} className="text-[#20B46A]" />
               </div>
+
+              <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-xl bg-white/80 dark:bg-[#171A23] border border-slate-200/70 dark:border-white/[0.06]">
+                <span className="inline-flex items-center gap-1.5 text-[10px] font-bold text-slate-600 dark:text-[#949BB0] truncate">
+                  <Trees size={11} className="text-[#20B46A] shrink-0" />
+                  <span className="truncate">
+                    {hasSavedDefaultTrees || currentLevel.canopyEngine?.enabled
+                      ? 'Trees synced to your defaults'
+                      : 'Using built-in horizon trees'}
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    store.setShowingAtmosphereDrawer(false);
+                    store.openTreeMaker();
+                  }}
+                  className="shrink-0 text-[10px] font-extrabold text-[#20B46A] hover:underline"
+                >
+                  Tree Maker
+                </button>
+              </div>
+
               <div className="grid grid-cols-2 gap-1.5">
                 {VistaPresets.map((vp) => {
                   const active = vistaPreset === vp.id;
@@ -381,28 +470,106 @@ export const AtmosphereDrawer: React.FC<{ store: MakerStore }> = ({ store }) => 
               </div>
 
               {vistaPreset !== 'none' && (
-                <div className="space-y-1 pt-0.5">
-                  <div className="flex justify-between text-[11px] font-semibold">
-                    <span>Forest &amp; peak density</span>
-                    <span className="tabular-nums text-slate-500 dark:text-[#949BB0]">
-                      {Math.round(vistaDensity * 100)}%
-                    </span>
+                <div className="space-y-2.5 pt-1">
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-[11px] font-semibold">
+                      <span>Horizon trees amount</span>
+                      <span className="tabular-nums text-slate-500 dark:text-[#949BB0]">
+                        {Math.round(vistaTreeDensity * 100)}%
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={1.5}
+                      step={0.05}
+                      value={vistaTreeDensity}
+                      onChange={(e) =>
+                        store.updateLevel(
+                          'set vista tree density',
+                          (lvl) => ({ ...lvl, vistaTreeDensity: Number(e.target.value) }),
+                          false
+                        )
+                      }
+                      className="w-full accent-[#20B46A]"
+                    />
                   </div>
-                  <input
-                    type="range"
-                    min={0.2}
-                    max={1}
-                    step={0.05}
-                    value={vistaDensity}
-                    onChange={(e) =>
-                      store.updateLevel(
-                        'set vista density',
-                        (lvl) => ({ ...lvl, vistaDensity: Number(e.target.value) }),
-                        false
-                      )
-                    }
-                    className="w-full accent-[#20B46A]"
-                  />
+
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-[11px] font-semibold">
+                      <span>Horizon tree size</span>
+                      <span className="tabular-nums text-slate-500 dark:text-[#949BB0]">
+                        {vistaTreeScale.toFixed(2)}×
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0.6}
+                      max={2.0}
+                      step={0.05}
+                      value={vistaTreeScale}
+                      onChange={(e) =>
+                        store.updateLevel(
+                          'set vista tree scale',
+                          (lvl) => ({ ...lvl, vistaTreeScale: Number(e.target.value) }),
+                          false
+                        )
+                      }
+                      className="w-full accent-[#20B46A]"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-[11px] font-semibold">
+                      <span>Mountains height &amp; relief</span>
+                      <span className="tabular-nums text-slate-500 dark:text-[#949BB0]">
+                        {Math.round(vistaMountainScale * 100)}%
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={1.8}
+                      step={0.05}
+                      value={vistaMountainScale}
+                      onChange={(e) =>
+                        store.updateLevel(
+                          'set vista mountain scale',
+                          (lvl) => ({ ...lvl, vistaMountainScale: Number(e.target.value) }),
+                          false
+                        )
+                      }
+                      className="w-full accent-[#7C5CFF]"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-[11px] font-semibold">
+                      <span>Vista distance from shore</span>
+                      <span className="tabular-nums text-slate-500 dark:text-[#949BB0]">
+                        {vistaDistance > 0
+                          ? `+${Math.round(vistaDistance)}m`
+                          : vistaDistance < 0
+                          ? `${Math.round(vistaDistance)}m`
+                          : 'Standard'}
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min={-30}
+                      max={260}
+                      step={5}
+                      value={vistaDistance}
+                      onChange={(e) =>
+                        store.updateLevel(
+                          'set vista distance',
+                          (lvl) => ({ ...lvl, vistaDistance: Number(e.target.value) }),
+                          false
+                        )
+                      }
+                      className="w-full accent-[#F59E0B]"
+                    />
+                  </div>
                 </div>
               )}
 

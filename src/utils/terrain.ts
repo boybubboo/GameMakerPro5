@@ -220,6 +220,15 @@ export function isNearMountainCaveEntrance(x: number, z: number): boolean {
   return lz <= 4.5 && lz >= -MountainCave.depth - 1.5 && Math.abs(lx) <= MountainCave.chamberHalfWidth + 1.5;
 }
 
+export function terrainHasMainMountainCave(terrain?: TerrainData | null): boolean {
+  if (!terrain?.caves || terrain.caves.length === 0) return false;
+  return terrain.caves.some(
+    (c) =>
+      c.id === 'cave-mountain-main' ||
+      Math.hypot(c.x - MountainCave.x, c.z - MountainCave.z) < 6
+  );
+}
+
 export const IslandTerrain = {
   radius: 156,
   baseTop: 1.15,
@@ -1109,40 +1118,42 @@ export function resolveHorizontalCollision(
       nz = (nz / dist) * maxR;
     }
 
-    // MountainCave interior & entrance pillar collision (enter freely through open mouth, stay inside cavern walls)
-    const local = toMountainCaveLocal(nx, nz);
-    let { lx, lz } = local;
-    if (lz <= 2.4 && lz >= -MountainCave.depth - 2.4 && Math.abs(lx) <= MountainCave.chamberHalfWidth + 2.8) {
-      // Entrance arch flanking pillars at lz in [-1.2, +1.5], |lx| >= mouthHalfWidth
-      if (lz > -1.35 && lz < 1.55) {
-        const minOpenX = MountainCave.mouthHalfWidth - radius * 0.6;
-        const outerPillarX = MountainCave.chamberHalfWidth + 1.8;
-        if (Math.abs(lx) > minOpenX && Math.abs(lx) < outerPillarX) {
-          if (Math.abs(lx) < (minOpenX + outerPillarX) * 0.5) {
-            lx = Math.sign(lx || 1) * minOpenX;
-          } else {
-            lx = Math.sign(lx || 1) * outerPillarX;
+    // MountainCave interior & entrance pillar collision (only when terrain actually contains the main MountainCave)
+    if (terrainHasMainMountainCave(level.terrain)) {
+      const local = toMountainCaveLocal(nx, nz);
+      let { lx, lz } = local;
+      if (lz <= 2.4 && lz >= -MountainCave.depth - 2.4 && Math.abs(lx) <= MountainCave.chamberHalfWidth + 2.8) {
+        // Entrance arch flanking pillars at lz in [-1.2, +1.5], |lx| >= mouthHalfWidth
+        if (lz > -1.35 && lz < 1.55) {
+          const minOpenX = MountainCave.mouthHalfWidth - radius * 0.6;
+          const outerPillarX = MountainCave.chamberHalfWidth + 1.8;
+          if (Math.abs(lx) > minOpenX && Math.abs(lx) < outerPillarX) {
+            if (Math.abs(lx) < (minOpenX + outerPillarX) * 0.5) {
+              lx = Math.sign(lx || 1) * minOpenX;
+            } else {
+              lx = Math.sign(lx || 1) * outerPillarX;
+            }
+          }
+        } else if (lz <= -1.35) {
+          // Inside the hollow cavern chamber: keep actor smoothly inside the curved stone walls
+          const wallHalfW = MountainCave.chamberHalfWidth - 0.85 - radius;
+          const backZ = -MountainCave.depth + 1.1 + radius;
+          if (Math.abs(lx) < MountainCave.chamberHalfWidth + 0.8 && lz > -MountainCave.depth - 0.6) {
+            // Rounded rear apse taper
+            const rearT = Math.max(0, (-lz - (MountainCave.depth - 4.4)) / 4.4);
+            const curHalfW = Math.max(1.8, wallHalfW * Math.sqrt(Math.max(0.15, 1 - rearT * rearT * 0.68)));
+            if (Math.abs(lx) > curHalfW) {
+              lx = Math.sign(lx) * curHalfW;
+            }
+            if (lz < backZ) {
+              lz = backZ;
+            }
           }
         }
-      } else if (lz <= -1.35) {
-        // Inside the hollow cavern chamber: keep actor smoothly inside the curved stone walls
-        const wallHalfW = MountainCave.chamberHalfWidth - 0.85 - radius;
-        const backZ = -MountainCave.depth + 1.1 + radius;
-        if (Math.abs(lx) < MountainCave.chamberHalfWidth + 0.8 && lz > -MountainCave.depth - 0.6) {
-          // Rounded rear apse taper
-          const rearT = Math.max(0, (-lz - (MountainCave.depth - 4.4)) / 4.4);
-          const curHalfW = Math.max(1.8, wallHalfW * Math.sqrt(Math.max(0.15, 1 - rearT * rearT * 0.68)));
-          if (Math.abs(lx) > curHalfW) {
-            lx = Math.sign(lx) * curHalfW;
-          }
-          if (lz < backZ) {
-            lz = backZ;
-          }
-        }
+        const [wx, wz] = fromMountainCaveLocal(lx, lz);
+        nx = wx;
+        nz = wz;
       }
-      const [wx, wz] = fromMountainCaveLocal(lx, lz);
-      nx = wx;
-      nz = wz;
     }
 
     return resolveGridObstacles(obstacleGrid, nx, nz, radius, context);
@@ -1200,11 +1211,15 @@ export function evaluateVistaHeight(
   x: number,
   z: number,
   innerRadius: number,
-  preset: VistaPresetId
+  preset: VistaPresetId,
+  mountainScale = 1
 ): number {
   if (preset === 'none') return IslandTerrain.waterLevel - 4.0;
   const dist = Math.hypot(x, z);
   if (dist <= innerRadius) return IslandTerrain.waterLevel - 3.2;
+
+  const mtnScale = Math.max(0, Math.min(2.2, mountainScale));
+  const hillScale = 0.28 + 0.72 * Math.min(1.4, mtnScale);
 
   const angle = Math.atan2(z, x);
   const span = Math.max(1, dist - innerRadius);
@@ -1219,22 +1234,30 @@ export function evaluateVistaHeight(
 
   const ridgeMask = Math.max(0, Math.min(1, (span - 45) / 145));
   const mtnWaves =
-    Math.abs(Math.sin(angle * 3.5 + 0.4)) * 28 +
-    Math.abs(Math.cos(angle * 7.0 - 0.8)) * 18 +
-    Math.abs(Math.sin(angle * 13.0 + dist * 0.014)) * 11;
+    (Math.abs(Math.sin(angle * 3.5 + 0.4)) * 28 +
+      Math.abs(Math.cos(angle * 7.0 - 0.8)) * 18 +
+      Math.abs(Math.sin(angle * 13.0 + dist * 0.014)) * 11) *
+    mtnScale;
 
   if (preset === 'coastalArchipelago') {
     const islandLobes = Math.sin(angle * 6 + 0.3) * Math.cos(dist * 0.022) + 0.15;
     if (islandLobes < 0) {
       return IslandTerrain.waterLevel - 2.4 + islandLobes * 2.0;
     }
-    const base = IslandTerrain.waterLevel + 1.2 + islandLobes * 14.5 + mtnWaves * ridgeMask * 0.55;
+    const base =
+      IslandTerrain.waterLevel +
+      1.2 +
+      islandLobes * (4.5 + 10.0 * Math.min(1.5, mtnScale)) +
+      mtnWaves * ridgeMask * 0.55;
     return (IslandTerrain.waterLevel - 2.8) * (1 - shoreSmooth) + base * shoreSmooth;
   }
 
   if (preset === 'mistyHills') {
     const hillBase =
-      IslandTerrain.waterLevel + 2.2 + Math.max(0, foothillWaves + 3.2) * 1.35 + mtnWaves * ridgeMask * 0.48;
+      IslandTerrain.waterLevel +
+      2.0 +
+      Math.max(0, foothillWaves + 3.2) * 1.35 * hillScale +
+      mtnWaves * ridgeMask * 0.48;
     return (IslandTerrain.waterLevel - 2.8) * (1 - shoreSmooth) + hillBase * shoreSmooth;
   }
 
@@ -1242,17 +1265,18 @@ export function evaluateVistaHeight(
     const crags =
       IslandTerrain.waterLevel +
       1.8 +
-      Math.max(0, foothillWaves + 2.5) +
-      Math.pow(ridgeMask, 0.88) * (mtnWaves * 1.38 + Math.abs(Math.sin(angle * 11)) * 14);
+      Math.max(0, foothillWaves + 2.5) * hillScale +
+      Math.pow(ridgeMask, 0.88) *
+        (mtnWaves * 1.38 + Math.abs(Math.sin(angle * 11)) * 14 * mtnScale);
     return (IslandTerrain.waterLevel - 2.8) * (1 - shoreSmooth) + crags * shoreSmooth;
   }
 
   // Default: alpineValley — lush forested valley foothills + towering distant alpine range
   const valleyBase =
     IslandTerrain.waterLevel +
-    2.4 +
-    Math.max(0, foothillWaves + 3.0) * 1.2 +
-    ridgeMask * ridgeMask * (mtnWaves * 1.28 + 8);
+    2.2 +
+    Math.max(0, foothillWaves + 3.0) * 1.2 * hillScale +
+    ridgeMask * ridgeMask * (mtnWaves * 1.28 + 8 * mtnScale);
   return (IslandTerrain.waterLevel - 2.8) * (1 - shoreSmooth) + valleyBase * shoreSmooth;
 }
 
@@ -1962,18 +1986,20 @@ export function sampleLevelHeight(level: GameLevel, x: number, z: number): numbe
 
   let h = sampleTerrainHeight(level.terrain, x, z);
 
-  // Lock smooth walkable cavern floor inside the MountainCave interior
-  if (isInsideMountainCave(x, z)) {
+  // Lock smooth walkable cavern floor inside the MountainCave interior only when terrain has the cave
+  if (terrainHasMainMountainCave(level.terrain) && isInsideMountainCave(x, z)) {
     h = MountainCave.floorY;
   }
 
-  // Check if standing on the wooden river crossing bridge
-  const dx = x - RiverCrossing.x;
-  const dz = z - RiverCrossing.z;
-  const along = dx * RiverCrossing.tx + dz * RiverCrossing.tz;
-  const perp = -dx * RiverCrossing.tz + dz * RiverCrossing.tx;
-  if (Math.abs(along) <= RiverCrossing.halfLength && Math.abs(perp) <= RiverCrossing.halfWidth) {
-    h = Math.max(h, RiverCrossing.deckY);
+  // Check if standing on the wooden river crossing bridge (only present on non-freeform template islands)
+  if (!level.terrain?.freeformWorld) {
+    const dx = x - RiverCrossing.x;
+    const dz = z - RiverCrossing.z;
+    const along = dx * RiverCrossing.tx + dz * RiverCrossing.tz;
+    const perp = -dx * RiverCrossing.tz + dz * RiverCrossing.tx;
+    if (Math.abs(along) <= RiverCrossing.halfLength && Math.abs(perp) <= RiverCrossing.halfWidth) {
+      h = Math.max(h, RiverCrossing.deckY);
+    }
   }
 
   return h;

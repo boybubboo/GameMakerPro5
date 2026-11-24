@@ -1,8 +1,10 @@
 import * as THREE from 'three';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import type {
+  CharacterAddonConfig,
   CharacterBeakStyle,
   CharacterEyebrowExpression,
+  CharacterHairStyle,
   CharacterMakerDoc,
   CharacterMaterialFinish,
   CharacterMouthStyle,
@@ -11,6 +13,8 @@ import type {
   CharacterNoseStyle,
   CharacterNostrilStyle,
   CharacterPresetId,
+  CharacterSpikesConfig,
+  CharacterSurfaceCoatConfig,
   CharacterTeethStyle,
 } from '../types/maker';
 import {
@@ -19,12 +23,15 @@ import {
   type SdfPrimitive,
 } from './sdfMarchingCubes';
 
+export type CharacterPresetCategory = 'humans' | 'animals' | 'creatures';
+
 export interface CharacterPresetInfo {
   id: CharacterPresetId;
   name: string;
   subtitle: string;
   accentHex: string;
   group: 'storybook' | 'hero';
+  category: CharacterPresetCategory;
   build: () => CharacterMakerDoc;
 }
 
@@ -336,6 +343,63 @@ export interface ResolvedCharacterExtras {
   buckTeethBottomWidth: number;
   wingFold: number;
   wingTipColor: string;
+  hairAccentColor: string;
+  hairOffsetX: number;
+  hairOffsetY: number;
+  hairOffsetZ: number;
+  hairRotX: number;
+  hairRotY: number;
+  hairRotZ: number;
+  hairScale: number;
+  surfaceCoat: CharacterSurfaceCoatConfig;
+  spikes: CharacterSpikesConfig;
+  addons: CharacterAddonConfig;
+}
+
+export function createDefaultSurfaceCoat(): CharacterSurfaceCoatConfig {
+  return {
+    mode: 'none',
+    intensity: 0.72,
+    density: 0.85,
+    scaleSize: 1.0,
+    clumpiness: 0.55,
+    tipColor: '#FDE68A',
+  };
+}
+
+export function createDefaultSpikesConfig(): CharacterSpikesConfig {
+  return {
+    enabled: false,
+    style: 'porcupineQuills',
+    zone: 'spine',
+    density: 0.85,
+    length: 0.16,
+    thickness: 1.0,
+    sweepDeg: 32,
+    color: '#292524',
+    tipColor: '#FEF3C7',
+  };
+}
+
+export function createDefaultAddonConfig(): CharacterAddonConfig {
+  return {
+    eyewear: 'none',
+    eyewearColor: '#1E293B',
+    eyewearLensColor: '#38BDF8',
+    eyewearOffsetY: 0,
+    eyewearOffsetZ: 0,
+    eyewearScale: 1.0,
+    headGear: 'none',
+    headGearColor: '#EF4444',
+    headGearAccentColor: '#FBBF24',
+    headGearOffsetY: 0,
+    headGearRotX: 0,
+    headGearScale: 1.0,
+    bodyGear: 'none',
+    bodyGearColor: '#8B5E3C',
+    bodyGearAccentColor: '#F59E0B',
+    bodyGearScale: 1.0,
+  };
 }
 
 export function resolveCharacterExtras(doc: CharacterMakerDoc): ResolvedCharacterExtras {
@@ -406,6 +470,17 @@ export function resolveCharacterExtras(doc: CharacterMakerDoc): ResolvedCharacte
     buckTeethBottomWidth: doc.buckTeethBottomWidth ?? 1.05,
     wingFold: doc.wingFold ?? 0.15,
     wingTipColor: doc.wingTipColor ?? doc.extremityTipColor,
+    hairAccentColor: doc.hairAccentColor ?? '#F43F5E',
+    hairOffsetX: doc.hairOffsetX ?? 0,
+    hairOffsetY: doc.hairOffsetY ?? 0,
+    hairOffsetZ: doc.hairOffsetZ ?? 0,
+    hairRotX: doc.hairRotX ?? 0,
+    hairRotY: doc.hairRotY ?? 0,
+    hairRotZ: doc.hairRotZ ?? 0,
+    hairScale: doc.hairScale ?? 1.0,
+    surfaceCoat: { ...createDefaultSurfaceCoat(), ...(doc.surfaceCoat ?? {}) },
+    spikes: { ...createDefaultSpikesConfig(), ...(doc.spikes ?? {}) },
+    addons: { ...createDefaultAddonConfig(), ...(doc.addons ?? {}) },
   };
 }
 
@@ -610,6 +685,17 @@ export function createDefaultCharacterDoc(): CharacterMakerDoc {
     hairStyle: 'spikyTufts',
     hairSize: 1.0,
     hairColor: '#5C3A21',
+    hairAccentColor: '#F43F5E',
+    hairOffsetX: 0,
+    hairOffsetY: 0,
+    hairOffsetZ: 0,
+    hairRotX: 0,
+    hairRotY: 0,
+    hairRotZ: 0,
+    hairScale: 1.0,
+    surfaceCoat: createDefaultSurfaceCoat(),
+    spikes: createDefaultSpikesConfig(),
+    addons: createDefaultAddonConfig(),
 
     beakStyle: 'none',
     beakLength: 0.07,
@@ -767,6 +853,148 @@ function makeStorybookPearBody(
 }
 
 export const CHARACTER_PRESETS: CharacterPresetInfo[] = [
+  // ---- HUMANS (Standard Humanoid first, preserving Adventurer Hero & Forest Elf) ----
+  {
+    id: 'standardHumanoid',
+    name: 'Standard Humanoid',
+    subtitle: 'Sphere head, defined neck taper & structured shoulders/joints',
+    accentHex: '#2563EB',
+    group: 'hero',
+    category: 'humans',
+    build: () => {
+      const base = createDefaultCharacterDoc();
+      const skin = '#F2C6A0';
+      const shirt = '#2563EB';
+      const pants = '#334155';
+      return {
+        ...base,
+        presetId: 'standardHumanoid',
+        materialFinish: 'toonSatin',
+        blendSmoothness: 0.026,
+        shoulderWidth: 0.215,
+        hipWidth: 0.125,
+        armSpreadDeg: 34,
+        legStanceWidth: 0.115,
+        headForwardTilt: 0.01,
+        snoutLength: 0,
+        muzzle: createMuzzlePreset('none', skin),
+        bellyPatchEnabled: false,
+        extremityTipColor: '#292524',
+        // Classic spherical head tapering clearly down into a distinct neck & collarbone
+        head: {
+          startRadius: 0.125,
+          midRadius: 0.145,
+          endRadius: 0.128,
+          curvature: 0.22,
+          length: 0.09,
+          squashX: 0.98,
+          squashZ: 1.02,
+          color: skin,
+        },
+        neck: {
+          startRadius: 0.056,
+          midRadius: 0.044,
+          endRadius: 0.052,
+          curvature: -0.06,
+          length: 0.185,
+          squashX: 0.96,
+          squashZ: 0.96,
+          color: '#E7B892',
+        },
+        torso: {
+          startRadius: 0.126,
+          midRadius: 0.158,
+          endRadius: 0.135,
+          curvature: 0.12,
+          length: 0.34,
+          squashX: 1.28,
+          squashZ: 0.84,
+          color: shirt,
+        },
+        belly: {
+          startRadius: 0.118,
+          midRadius: 0.115,
+          endRadius: 0.126,
+          curvature: 0.0,
+          length: 0.21,
+          squashX: 1.15,
+          squashZ: 0.88,
+          color: '#1D4ED8',
+        },
+        hips: {
+          startRadius: 0.125,
+          midRadius: 0.136,
+          endRadius: 0.12,
+          curvature: 0.08,
+          length: 0.15,
+          squashX: 1.18,
+          squashZ: 0.92,
+          color: pants,
+        },
+        upperArm: {
+          startRadius: 0.058,
+          midRadius: 0.05,
+          endRadius: 0.042,
+          curvature: 0.04,
+          length: 0.28,
+          color: shirt,
+        },
+        lowerArm: {
+          startRadius: 0.044,
+          midRadius: 0.04,
+          endRadius: 0.032,
+          curvature: 0.02,
+          length: 0.26,
+          color: skin,
+        },
+        upperLeg: {
+          startRadius: 0.082,
+          midRadius: 0.072,
+          endRadius: 0.054,
+          curvature: 0.08,
+          length: 0.36,
+          color: pants,
+        },
+        lowerLeg: {
+          startRadius: 0.054,
+          midRadius: 0.048,
+          endRadius: 0.038,
+          curvature: -0.04,
+          length: 0.35,
+          color: '#475569',
+        },
+        handStyle: 'fingers5',
+        handScale: 0.95,
+        footStyle: 'biped',
+        footScale: 1.0,
+        earStyle: 'human',
+        earSize: 0.92,
+        earColor: skin,
+        hairStyle: 'shortCrop',
+        hairSize: 1.0,
+        hairScale: 1.0,
+        hairColor: '#4A3123',
+        noseStyle: 'longHuman',
+        noseSize: 0.017,
+        noseColor: '#E3B088',
+        eyeFlatness: 0.68,
+        eyeSize: 0.034,
+        eyeSpacing: 0.056,
+        eyeHeight: 0.014,
+        irisColor: '#2563EB',
+        eyelidColor: '#E5B48D',
+        eyebrowColor: '#3E2723',
+        eyebrowHeight: 0.018,
+        eyebrowWidth: 0.052,
+        eyebrowThickness: 0.01,
+        mouthStyle: 'smile',
+        mouthSize: 0.85,
+        mouthOffsetY: 0.008,
+        mouthColor: '#9F4A4A',
+      };
+    },
+  },
+
   // ---- STORYBOOK ANTHROPOMORPHIC ANIMALS ----
   {
     id: 'storyHorse',
@@ -774,6 +1002,7 @@ export const CHARACTER_PRESETS: CharacterPresetInfo[] = [
     subtitle: 'Tubby upright pony with 5-seg flared muzzle, side nostrils & hoofs',
     accentHex: '#A16207',
     group: 'storybook',
+    category: 'animals',
     build: () => {
       const base = createDefaultCharacterDoc();
       const coat = '#9A5B37';
@@ -845,6 +1074,7 @@ export const CHARACTER_PRESETS: CharacterPresetInfo[] = [
     subtitle: 'Cute tubby squirrel with split puff muzzle, buck teeth & big plume tail',
     accentHex: '#EA580C',
     group: 'storybook',
+    category: 'animals',
     build: () => {
       const base = createDefaultCharacterDoc();
       const fur = '#C86428';
@@ -911,6 +1141,7 @@ export const CHARACTER_PRESETS: CharacterPresetInfo[] = [
     subtitle: 'Tubby bunny with split cheeks, tall ears, buck teeth & pom-pom tail',
     accentHex: '#EC4899',
     group: 'storybook',
+    category: 'animals',
     build: () => {
       const base = createDefaultCharacterDoc();
       const fur = '#EDE7DF';
@@ -979,6 +1210,7 @@ export const CHARACTER_PRESETS: CharacterPresetInfo[] = [
     subtitle: 'Sly charming fox with long tapered snout, brush tail & triangular ears',
     accentHex: '#F97316',
     group: 'storybook',
+    category: 'animals',
     build: () => {
       const base = createDefaultCharacterDoc();
       const fur = '#E05A1E';
@@ -1044,6 +1276,7 @@ export const CHARACTER_PRESETS: CharacterPresetInfo[] = [
     subtitle: 'Tubby gecko lizard with huge rolled spiral tail nearly tall as its back',
     accentHex: '#22C55E',
     group: 'storybook',
+    category: 'animals',
     build: () => {
       const base = createDefaultCharacterDoc();
       const scales = '#4ADE80';
@@ -1113,6 +1346,7 @@ export const CHARACTER_PRESETS: CharacterPresetInfo[] = [
     subtitle: 'Cozy big-bellied bear with round ears, broad snout & friendly smile',
     accentHex: '#92400E',
     group: 'storybook',
+    category: 'animals',
     build: () => {
       const base = createDefaultCharacterDoc();
       const fur = '#854D27';
@@ -1173,6 +1407,7 @@ export const CHARACTER_PRESETS: CharacterPresetInfo[] = [
     subtitle: 'Plump wise owl with hooked beak, round bird wings, big eyes & tufts',
     accentHex: '#78350F',
     group: 'storybook',
+    category: 'animals',
     build: () => {
       const base = createDefaultCharacterDoc();
       const plumage = '#78523A';
@@ -1240,6 +1475,7 @@ export const CHARACTER_PRESETS: CharacterPresetInfo[] = [
     subtitle: 'Chubby canary bird with short orange beak, rounded wings & fan tail',
     accentHex: '#EAB308',
     group: 'storybook',
+    category: 'animals',
     build: () => {
       const base = createDefaultCharacterDoc();
       const yellow = '#FACC15';
@@ -1314,6 +1550,7 @@ export const CHARACTER_PRESETS: CharacterPresetInfo[] = [
     subtitle: 'Stylized clay hero with 5-finger hands & expressive eyes',
     accentHex: '#3B82F6',
     group: 'hero',
+    category: 'humans',
     build: () => createDefaultCharacterDoc(),
   },
   {
@@ -1322,6 +1559,7 @@ export const CHARACTER_PRESETS: CharacterPresetInfo[] = [
     subtitle: 'Slender curves, long pointed elf ears & arched brows',
     accentHex: '#20B46A',
     group: 'hero',
+    category: 'humans',
     build: () => {
       const base = createDefaultCharacterDoc();
       return {
@@ -1361,6 +1599,7 @@ export const CHARACTER_PRESETS: CharacterPresetInfo[] = [
     subtitle: 'Plump clay monster-pal with round paws & bulb tail',
     accentHex: '#F59E0B',
     group: 'hero',
+    category: 'creatures',
     build: () => {
       const base = createDefaultCharacterDoc();
       return {
@@ -1427,6 +1666,7 @@ export const CHARACTER_PRESETS: CharacterPresetInfo[] = [
     subtitle: '4-eyed starfarer with extra arms, antennae & sleek limbs',
     accentHex: '#7C5CFF',
     group: 'hero',
+    category: 'creatures',
     build: () => {
       const base = createDefaultCharacterDoc();
       return {
@@ -1484,6 +1724,7 @@ export const CHARACTER_PRESETS: CharacterPresetInfo[] = [
     subtitle: 'Broad shoulders, ram horns, dragon wings, claws & hoofs',
     accentHex: '#EF4444',
     group: 'hero',
+    category: 'creatures',
     build: () => {
       const base = createDefaultCharacterDoc();
       return {
@@ -2027,6 +2268,1153 @@ function buildOpenMouthGroup(
   }
 
   return g;
+}
+
+/** Deterministic integer hash 0..1 for stable procedural sampling */
+function hashInt01(n: number): number {
+  let x = (n | 0) * 374761393;
+  x = (x ^ (x >> 13)) * 1274126177;
+  return ((x ^ (x >> 16)) >>> 0) / 4294967295;
+}
+
+/** Merges multiple vertex-colored BufferGeometries into one single indexed/non-indexed BufferGeometry */
+function mergeVertexColoredGeometries(parts: THREE.BufferGeometry[]): THREE.BufferGeometry | null {
+  if (parts.length === 0) return null;
+  let totalVerts = 0;
+  const normalized = parts.map((raw) => {
+    const g = raw.index ? raw.toNonIndexed() : raw;
+    totalVerts += g.attributes.position.count;
+    return g;
+  });
+
+  const positions = new Float32Array(totalVerts * 3);
+  const normals = new Float32Array(totalVerts * 3);
+  const colors = new Float32Array(totalVerts * 3);
+  let offset = 0;
+
+  for (const g of normalized) {
+    const posAttr = g.attributes.position as THREE.BufferAttribute;
+    const normAttr = g.attributes.normal as THREE.BufferAttribute | undefined;
+    const colAttr = g.attributes.color as THREE.BufferAttribute | undefined;
+    const count = posAttr.count;
+    for (let i = 0; i < count; i++) {
+      const dst = (offset + i) * 3;
+      positions[dst] = posAttr.getX(i);
+      positions[dst + 1] = posAttr.getY(i);
+      positions[dst + 2] = posAttr.getZ(i);
+      if (normAttr) {
+        normals[dst] = normAttr.getX(i);
+        normals[dst + 1] = normAttr.getY(i);
+        normals[dst + 2] = normAttr.getZ(i);
+      } else {
+        normals[dst + 1] = 1;
+      }
+      if (colAttr) {
+        colors[dst] = colAttr.getX(i);
+        colors[dst + 1] = colAttr.getY(i);
+        colors[dst + 2] = colAttr.getZ(i);
+      } else {
+        colors[dst] = 1;
+        colors[dst + 1] = 1;
+        colors[dst + 2] = 1;
+      }
+    }
+    offset += count;
+    if (g !== parts[normalized.indexOf(g)]) {
+      g.dispose();
+    }
+  }
+  for (const p of parts) p.dispose();
+
+  const merged = new THREE.BufferGeometry();
+  merged.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  merged.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+  merged.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  merged.computeBoundingSphere();
+  return merged;
+}
+
+function paintGeometryGradient(
+  geo: THREE.BufferGeometry,
+  baseCol: THREE.Color,
+  tipCol: THREE.Color,
+  minAxisY = 0,
+  maxAxisY = 1
+): THREE.BufferGeometry {
+  const pos = geo.attributes.position as THREE.BufferAttribute;
+  const colArr = new Float32Array(pos.count * 3);
+  const tmp = new THREE.Color();
+  const span = Math.max(0.0001, maxAxisY - minAxisY);
+  for (let i = 0; i < pos.count; i++) {
+    const t = THREE.MathUtils.clamp((pos.getY(i) - minAxisY) / span, 0, 1);
+    tmp.copy(baseCol).lerp(tipCol, t);
+    colArr[i * 3] = tmp.r;
+    colArr[i * 3 + 1] = tmp.g;
+    colArr[i * 3 + 2] = tmp.b;
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(colArr, 3));
+  return geo;
+}
+
+/** Builds procedural seamless tileable albedo+bump+roughness textures for fur & scales */
+function createSurfaceCoatTextures(coat: CharacterSurfaceCoatConfig): {
+  map: THREE.CanvasTexture;
+  bumpMap: THREE.CanvasTexture;
+  roughnessMap: THREE.CanvasTexture;
+  bumpScale: number;
+} | null {
+  if (coat.mode === 'none' || typeof document === 'undefined') return null;
+
+  const size = 256;
+  const albedoCanvas = document.createElement('canvas');
+  const bumpCanvas = document.createElement('canvas');
+  const roughCanvas = document.createElement('canvas');
+  albedoCanvas.width = bumpCanvas.width = roughCanvas.width = size;
+  albedoCanvas.height = bumpCanvas.height = roughCanvas.height = size;
+
+  const aCtx = albedoCanvas.getContext('2d');
+  const bCtx = bumpCanvas.getContext('2d');
+  const rCtx = roughCanvas.getContext('2d');
+  if (!aCtx || !bCtx || !rCtx) return null;
+
+  const intensity = THREE.MathUtils.clamp(coat.intensity, 0.05, 1);
+  const densityMult = THREE.MathUtils.clamp(coat.density, 0.3, 1.8);
+  const sizeScale = THREE.MathUtils.clamp(coat.scaleSize, 0.5, 2.0);
+  const tipRgb = new THREE.Color(coat.tipColor || '#FDE68A');
+
+  // Neutral white base for albedo (preserves vertexColors cleanly!)
+  aCtx.fillStyle = '#FFFFFF';
+  aCtx.fillRect(0, 0, size, size);
+  bCtx.fillStyle = '#505050';
+  bCtx.fillRect(0, 0, size, size);
+  rCtx.fillStyle = coat.mode.startsWith('scales') ? '#707070' : '#D0D0D0';
+  rCtx.fillRect(0, 0, size, size);
+
+  if (coat.mode.startsWith('fur')) {
+    const isLong = coat.mode === 'furLong';
+    const isClump = coat.mode === 'furClumped';
+    const count = Math.round((isLong ? 340 : 520) * densityMult);
+    const baseLen = (isLong ? 36 : isClump ? 26 : 16) * sizeScale;
+    const baseW = (isClump ? 4.4 : isLong ? 2.6 : 1.9) * sizeScale;
+
+    for (let i = 0; i < count; i++) {
+      const h1 = hashInt01(i * 13 + 7);
+      const h2 = hashInt01(i * 29 + 19);
+      const h3 = hashInt01(i * 41 + 31);
+      let x = h1 * size;
+      let y = h2 * size;
+      if (isClump) {
+        const cx = Math.floor(h1 * 6) * (size / 6) + size / 12;
+        const cy = Math.floor(h2 * 6) * (size / 6) + size / 12;
+        const spread = THREE.MathUtils.lerp(28, 10, coat.clumpiness);
+        x = (cx + (h3 - 0.5) * spread + size) % size;
+        y = (cy + (hashInt01(i * 53) - 0.5) * spread + size) % size;
+      }
+      const len = baseLen * (0.7 + h3 * 0.65);
+      const angle = (hashInt01(i * 71) - 0.5) * (isClump ? 0.55 : 0.35);
+
+      const darkTone = Math.round(255 - intensity * 68);
+      const bumpHi = Math.round(135 + intensity * 115);
+
+      // Draw wrapped across tile edges
+      for (const ox of [-size, 0, size]) {
+        for (const oy of [-size, 0, size]) {
+          const px = x + ox;
+          const py = y + oy;
+          if (px < -len || px > size + len || py < -len || py > size + len) continue;
+          const ex = px + Math.sin(angle) * len;
+          const ey = py + Math.cos(angle) * len;
+
+          aCtx.strokeStyle = `rgba(${darkTone},${darkTone},${darkTone},${0.35 * intensity})`;
+          aCtx.lineWidth = baseW * 1.15;
+          aCtx.lineCap = 'round';
+          aCtx.beginPath();
+          aCtx.moveTo(px, py);
+          aCtx.lineTo(ex, ey);
+          aCtx.stroke();
+
+          // Subtle tip highlight blend
+          const tipHex = `rgba(${Math.round(tipRgb.r * 255)},${Math.round(tipRgb.g * 255)},${Math.round(tipRgb.b * 255)},${0.22 * intensity})`;
+          aCtx.strokeStyle = tipHex;
+          aCtx.lineWidth = baseW * 0.65;
+          aCtx.beginPath();
+          aCtx.moveTo(px + (ex - px) * 0.45, py + (ey - py) * 0.45);
+          aCtx.lineTo(ex, ey);
+          aCtx.stroke();
+
+          bCtx.strokeStyle = `rgb(${bumpHi},${bumpHi},${bumpHi})`;
+          bCtx.lineWidth = baseW;
+          bCtx.lineCap = 'round';
+          bCtx.beginPath();
+          bCtx.moveTo(px, py);
+          bCtx.lineTo(ex, ey);
+          bCtx.stroke();
+        }
+      }
+    }
+  } else {
+    // Scales (fish, dragon, hex)
+    const isDragon = coat.mode === 'scalesDragon';
+    const isHex = coat.mode === 'scalesHex';
+    const cols = Math.max(4, Math.round((isDragon ? 8 : 11) * densityMult / sizeScale));
+    const rows = cols;
+    const cellW = size / cols;
+    const cellH = size / rows;
+    const outlineTone = Math.round(255 - intensity * 95);
+
+    for (let row = -1; row <= rows + 1; row++) {
+      for (let col = -1; col <= cols + 1; col++) {
+        const cx = (col + (row % 2 === 0 ? 0 : 0.5)) * cellW;
+        const cy = row * cellH;
+        const rx = cellW * (isDragon ? 0.52 : 0.55);
+        const ry = cellH * (isDragon ? 0.64 : 0.6);
+
+        const drawScale = (ctx: CanvasRenderingContext2D, fill: string, stroke: string, lw: number) => {
+          ctx.beginPath();
+          if (isDragon) {
+            ctx.moveTo(cx, cy - ry);
+            ctx.lineTo(cx + rx, cy);
+            ctx.lineTo(cx, cy + ry);
+            ctx.lineTo(cx - rx, cy);
+            ctx.closePath();
+          } else if (isHex) {
+            for (let k = 0; k < 6; k++) {
+              const a = (k / 6) * Math.PI * 2 + Math.PI / 6;
+              const px = cx + Math.cos(a) * rx * 0.96;
+              const py = cy + Math.sin(a) * ry * 0.96;
+              if (k === 0) ctx.moveTo(px, py);
+              else ctx.lineTo(px, py);
+            }
+            ctx.closePath();
+          } else {
+            ctx.arc(cx, cy, rx, 0, Math.PI * 2);
+          }
+          ctx.fillStyle = fill;
+          ctx.fill();
+          ctx.strokeStyle = stroke;
+          ctx.lineWidth = lw;
+          ctx.stroke();
+        };
+
+        const grad = bCtx.createRadialGradient(cx, cy - ry * 0.25, rx * 0.1, cx, cy, Math.max(rx, ry));
+        grad.addColorStop(0, `rgb(${Math.min(255, Math.round(180 + intensity * 75))},${Math.min(255, Math.round(180 + intensity * 75))},${Math.min(255, Math.round(180 + intensity * 75))})`);
+        grad.addColorStop(1, 'rgb(45,45,45)');
+        bCtx.save();
+        bCtx.fillStyle = grad;
+        drawScale(bCtx, '#C8C8C8', '#222222', Math.max(1.5, cellW * 0.08));
+        bCtx.restore();
+        if (isDragon) {
+          // Dorsal keel ridge along center of each dragon scale
+          bCtx.strokeStyle = '#FFFFFF';
+          bCtx.lineWidth = Math.max(1.5, cellW * 0.09);
+          bCtx.beginPath();
+          bCtx.moveTo(cx, cy - ry * 0.72);
+          bCtx.lineTo(cx, cy + ry * 0.72);
+          bCtx.stroke();
+        }
+
+        const tintFill = `rgba(${Math.round(235 + tipRgb.r * 20)},${Math.round(235 + tipRgb.g * 20)},${Math.round(235 + tipRgb.b * 20)},${0.18 * intensity})`;
+        drawScale(aCtx, tintFill, `rgba(${outlineTone},${outlineTone},${outlineTone},${0.55 * intensity})`, Math.max(1, cellW * 0.07));
+        drawScale(rCtx, isDragon ? '#585858' : '#3C3C3C', '#CCCCCC', Math.max(1, cellW * 0.06));
+      }
+    }
+  }
+
+  const repeat = coat.mode.startsWith('fur') ? 4 : 4; // even repeat keeps seamless UV symmetry
+  const makeTex = (canvas: HTMLCanvasElement, isColor: boolean) => {
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(repeat, repeat);
+    tex.colorSpace = isColor ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+    tex.needsUpdate = true;
+    return tex;
+  };
+
+  return {
+    map: makeTex(albedoCanvas, true),
+    bumpMap: makeTex(bumpCanvas, false),
+    roughnessMap: makeTex(roughCanvas, false),
+    bumpScale: (coat.mode.startsWith('scales') ? 0.022 : 0.016) * intensity,
+  };
+}
+
+/** Builds layered 3D hair meshes mounted directly on Head bone so placement, rotation & scale move freely without skull SDF melting */
+function buildLayeredHairGroup(
+  doc: CharacterMakerDoc,
+  ext: ResolvedCharacterExtras,
+  crownLocalY: number,
+  skullRx: number,
+  skullRz: number
+): THREE.Group | null {
+  if (doc.hairStyle === 'none') return null;
+
+  const rootGroup = new THREE.Group();
+  rootGroup.name = 'CharHair';
+  rootGroup.position.set(ext.hairOffsetX, crownLocalY + ext.hairOffsetY, ext.hairOffsetZ);
+  rootGroup.rotation.set(
+    THREE.MathUtils.degToRad(ext.hairRotX),
+    THREE.MathUtils.degToRad(ext.hairRotY),
+    THREE.MathUtils.degToRad(ext.hairRotZ)
+  );
+
+  const scaleGroup = new THREE.Group();
+  const s = THREE.MathUtils.clamp((doc.hairSize || 1) * ext.hairScale, 0.25, 3.0);
+  scaleGroup.scale.setScalar(s);
+  rootGroup.add(scaleGroup);
+
+  const hairMat = new THREE.MeshStandardMaterial({
+    color: doc.hairColor,
+    roughness: 0.62,
+    metalness: 0.03,
+  });
+  const accentMat = new THREE.MeshStandardMaterial({
+    color: ext.hairAccentColor,
+    roughness: 0.42,
+    metalness: 0.06,
+  });
+
+  const r = Math.max(0.11, skullRx * 1.03);
+  const rz = Math.max(0.11, skullRz * 1.03);
+
+  const addCap = (heightFrac = 0.65, yShift = -r * 0.36, capMat = hairMat) => {
+    const capGeo = new THREE.SphereGeometry(1, 20, 14, 0, Math.PI * 2, 0, Math.PI * heightFrac);
+    const cap = new THREE.Mesh(capGeo, capMat);
+    cap.scale.set(r * 1.04, r * 0.96, rz * 1.05);
+    cap.position.set(0, yShift, -rz * 0.03);
+    cap.rotation.x = -0.22;
+    cap.castShadow = true;
+    scaleGroup.add(cap);
+    return cap;
+  };
+
+  const addStrand = (
+    pts: THREE.Vector3[],
+    rBase: number,
+    rTip: number,
+    mat = hairMat,
+    flattenX = 1.0
+  ) => {
+    const segs = Math.max(2, pts.length - 1);
+    for (let i = 0; i < segs; i++) {
+      const f0 = i / segs;
+      const f1 = (i + 1) / segs;
+      const rad0 = THREE.MathUtils.lerp(rBase, rTip, f0);
+      const rad1 = THREE.MathUtils.lerp(rBase, rTip, f1);
+      const a = pts[i];
+      const b = pts[i + 1];
+      const dir = b.clone().sub(a);
+      const len = Math.max(0.01, dir.length());
+      const geo = new THREE.CylinderGeometry(rad1, rad0, len * 1.08, 10);
+      geo.scale(flattenX, 1, 1);
+      const m = new THREE.Mesh(geo, mat);
+      m.position.copy(a).lerp(b, 0.5);
+      m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
+      m.castShadow = true;
+      scaleGroup.add(m);
+    }
+    const tipBall = new THREE.Mesh(new THREE.SphereGeometry(rTip * 0.98, 8, 6), mat);
+    tipBall.position.copy(pts[pts.length - 1]);
+    tipBall.scale.set(flattenX, 1, 1);
+    scaleGroup.add(tipBall);
+  };
+
+  const style: CharacterHairStyle = doc.hairStyle;
+
+  if (style === 'buzzFade') {
+    addCap(0.56, -r * 0.38);
+  } else if (style === 'shortCrop') {
+    addCap(0.62, -r * 0.35);
+    // Crisp layered front bangs locks
+    for (let i = -2; i <= 2; i++) {
+      const x = i * r * 0.32;
+      addStrand(
+        [
+          new THREE.Vector3(x * 0.7, r * 0.28, rz * 0.38),
+          new THREE.Vector3(x * 0.92, r * 0.04, rz * 0.92),
+          new THREE.Vector3(x * 0.96, -r * 0.14, rz * 0.88),
+        ],
+        0.028,
+        0.012
+      );
+    }
+  } else if (style === 'sidePart') {
+    addCap(0.6, -r * 0.36);
+    // Voluminous swept side wave across brow
+    for (let i = 0; i < 5; i++) {
+      const f = i / 4;
+      const sx = -r * 0.42 + f * r * 0.55;
+      addStrand(
+        [
+          new THREE.Vector3(sx, r * 0.42, rz * 0.18),
+          new THREE.Vector3(sx + r * 0.38, r * 0.34 - f * 0.02, rz * 0.65),
+          new THREE.Vector3(sx + r * 0.66, r * 0.06, rz * 0.72),
+        ],
+        0.036 - f * 0.004,
+        0.014
+      );
+    }
+  } else if (style === 'pompadour') {
+    addCap(0.54, -r * 0.4);
+    // High rolled pompadour crest
+    const pompGeo = new THREE.CapsuleGeometry(r * 0.42, r * 0.85, 8, 14);
+    pompGeo.rotateX(Math.PI * 0.36);
+    const pomp = new THREE.Mesh(pompGeo, hairMat);
+    pomp.scale.set(0.95, 1.05, 1.15);
+    pomp.position.set(0, r * 0.46, rz * 0.38);
+    pomp.castShadow = true;
+    scaleGroup.add(pomp);
+    // Swept back ridge
+    const backCrest = new THREE.Mesh(new THREE.SphereGeometry(r * 0.44, 14, 10), hairMat);
+    backCrest.scale.set(0.88, 0.85, 1.25);
+    backCrest.position.set(0, r * 0.38, -rz * 0.15);
+    scaleGroup.add(backCrest);
+  } else if (style === 'messySpiky') {
+    addCap(0.58, -r * 0.36);
+    const spikeDirs = [
+      [0, 0.17, 0.06],
+      [-0.08, 0.14, 0.08],
+      [0.08, 0.14, 0.08],
+      [-0.12, 0.1, 0.02],
+      [0.12, 0.1, 0.02],
+      [-0.07, 0.15, -0.06],
+      [0.07, 0.15, -0.06],
+      [0, 0.13, -0.11],
+      [-0.1, 0.06, 0.1],
+      [0.1, 0.06, 0.1],
+    ];
+    for (const [dx, dy, dz] of spikeDirs) {
+      const base = new THREE.Vector3(dx * 0.45, r * 0.15, dz * 0.45);
+      const mid = base.clone().add(new THREE.Vector3(dx * 0.55, dy * 0.65, dz * 0.55));
+      const tip = base.clone().add(new THREE.Vector3(dx * 1.1, dy * 1.05, dz * 1.1));
+      addStrand([base, mid, tip], 0.036, 0.005);
+    }
+  } else if (style === 'undercut') {
+    addCap(0.5, -r * 0.42);
+    for (let i = -2; i <= 2; i++) {
+      const x = i * r * 0.24;
+      addStrand(
+        [
+          new THREE.Vector3(x * 0.6, r * 0.32, -rz * 0.35),
+          new THREE.Vector3(x * 0.8 + 0.02, r * 0.5, rz * 0.1),
+          new THREE.Vector3(x * 0.9 + 0.04, r * 0.36, rz * 0.72),
+        ],
+        0.042,
+        0.015
+      );
+    }
+  } else if (style === 'surferCurtains') {
+    addCap(0.6, -r * 0.35);
+    ([-1, 1] as const).forEach((side) => {
+      for (let i = 0; i < 3; i++) {
+        const zOff = (i - 1) * rz * 0.32;
+        addStrand(
+          [
+            new THREE.Vector3(side * 0.02, r * 0.4, zOff + rz * 0.12),
+            new THREE.Vector3(side * r * 0.88, r * 0.12, zOff + rz * 0.42),
+            new THREE.Vector3(side * r * 1.06, -r * 0.72, zOff + rz * 0.25),
+            new THREE.Vector3(side * r * 0.92, -r * 1.15, zOff - rz * 0.08),
+          ],
+          0.036,
+          0.014
+        );
+      }
+    });
+  } else if (style === 'longStraight') {
+    addCap(0.68, -r * 0.32);
+    // Sleek back veil draping past shoulders
+    for (let i = -3; i <= 3; i++) {
+      const x = i * r * 0.32;
+      const depthCurve = Math.sqrt(Math.max(0.1, 1 - (i / 3.6) ** 2));
+      addStrand(
+        [
+          new THREE.Vector3(x * 0.7, r * 0.25, -rz * 0.35 * depthCurve),
+          new THREE.Vector3(x * 0.98, -r * 0.55, -rz * 0.96 * depthCurve),
+          new THREE.Vector3(x * 1.05, -r * 1.65, -rz * 1.05 * depthCurve),
+          new THREE.Vector3(x * 1.02, -r * 2.45, -rz * 0.98 * depthCurve),
+        ],
+        0.044,
+        0.024
+      );
+    }
+    // Face-framing front locks + soft bangs
+    ([-1, 1] as const).forEach((side) => {
+      addStrand(
+        [
+          new THREE.Vector3(side * r * 0.55, r * 0.25, rz * 0.58),
+          new THREE.Vector3(side * r * 0.98, -r * 0.45, rz * 0.56),
+          new THREE.Vector3(side * r * 0.92, -r * 1.45, rz * 0.44),
+        ],
+        0.032,
+        0.014
+      );
+    });
+  } else if (style === 'bobCut') {
+    addCap(0.7, -r * 0.34);
+    for (let i = -3; i <= 3; i++) {
+      const a = Math.PI * 0.18 + ((i + 3) / 6) * Math.PI * 1.64;
+      const sx = Math.sin(a) * r * 0.95;
+      const sz = -Math.cos(a) * rz * 0.95;
+      addStrand(
+        [
+          new THREE.Vector3(sx * 0.6, r * 0.2, sz * 0.6),
+          new THREE.Vector3(sx * 1.12, -r * 0.38, sz * 1.12),
+          new THREE.Vector3(sx * 0.96, -r * 0.88, sz * 0.96),
+        ],
+        0.042,
+        0.022
+      );
+    }
+    // Smooth fringe
+    for (let i = -2; i <= 2; i++) {
+      addStrand(
+        [
+          new THREE.Vector3(i * r * 0.24, r * 0.34, rz * 0.5),
+          new THREE.Vector3(i * r * 0.28, r * 0.04, rz * 0.95),
+        ],
+        0.028,
+        0.016
+      );
+    }
+  } else if (style === 'wavyShoulder') {
+    addCap(0.68, -r * 0.32);
+    for (let i = -3; i <= 3; i++) {
+      const x = i * r * 0.32;
+      const phase = i * 0.6;
+      addStrand(
+        [
+          new THREE.Vector3(x * 0.65, r * 0.22, -rz * 0.25),
+          new THREE.Vector3(x * 1.05 + Math.sin(phase) * 0.02, -r * 0.35, -rz * 0.95),
+          new THREE.Vector3(x * 1.14 - Math.sin(phase) * 0.025, -r * 0.95, -rz * 0.88),
+          new THREE.Vector3(x * 1.06 + Math.sin(phase) * 0.03, -r * 1.62, -rz * 1.02),
+        ],
+        0.042,
+        0.018
+      );
+    }
+    ([-1, 1] as const).forEach((side) => {
+      addStrand(
+        [
+          new THREE.Vector3(side * r * 0.62, r * 0.22, rz * 0.5),
+          new THREE.Vector3(side * r * 1.06, -r * 0.38, rz * 0.58),
+          new THREE.Vector3(side * r * 0.95, -r * 1.05, rz * 0.35),
+        ],
+        0.032,
+        0.014
+      );
+    });
+  } else if (style === 'twinPigtails') {
+    addCap(0.62, -r * 0.34);
+    ([-1, 1] as const).forEach((side) => {
+      const tie = new THREE.Mesh(new THREE.TorusGeometry(0.036, 0.013, 8, 16), accentMat);
+      tie.position.set(side * r * 1.05, r * 0.14, -rz * 0.12);
+      tie.rotation.y = side * 0.7;
+      scaleGroup.add(tie);
+      addStrand(
+        [
+          new THREE.Vector3(side * r * 1.04, r * 0.14, -rz * 0.12),
+          new THREE.Vector3(side * r * 1.48, -r * 0.15, -rz * 0.22),
+          new THREE.Vector3(side * r * 1.56, -r * 0.95, -rz * 0.28),
+          new THREE.Vector3(side * r * 1.38, -r * 1.45, -rz * 0.12),
+        ],
+        0.052,
+        0.018
+      );
+    });
+  } else if (style === 'highBun') {
+    addCap(0.62, -r * 0.35);
+    const band = new THREE.Mesh(new THREE.TorusGeometry(0.052, 0.014, 8, 18), accentMat);
+    band.rotation.x = Math.PI * 0.5;
+    band.position.set(0, r * 0.68, -rz * 0.18);
+    scaleGroup.add(band);
+    const bun = new THREE.Mesh(new THREE.SphereGeometry(r * 0.58, 16, 14), hairMat);
+    bun.scale.set(1.05, 0.88, 1.05);
+    bun.position.set(0, r * 0.88, -rz * 0.2);
+    bun.castShadow = true;
+    scaleGroup.add(bun);
+  } else if (style === 'braidedCrown') {
+    addCap(0.64, -r * 0.34);
+    // Woven crown ring of beads circling forehead & sides
+    const links = 16;
+    for (let i = 0; i < links; i++) {
+      const a = (i / links) * Math.PI * 2;
+      const link = new THREE.Mesh(new THREE.SphereGeometry(0.032, 10, 8), i % 4 === 0 ? accentMat : hairMat);
+      link.position.set(Math.sin(a) * r * 1.02, r * 0.28 + Math.cos(a) * 0.02, Math.cos(a) * rz * 1.02);
+      link.scale.set(1.15, 0.85, 1.15);
+      scaleGroup.add(link);
+    }
+    // Back plait
+    for (let p = 0; p < 6; p++) {
+      const bead = new THREE.Mesh(new THREE.SphereGeometry(0.036 * (1 - p * 0.1), 10, 8), hairMat);
+      bead.position.set((p % 2 === 0 ? 1 : -1) * 0.012, -r * 0.15 - p * 0.058, -rz * 1.02 - p * 0.012);
+      scaleGroup.add(bead);
+    }
+  } else if (style === 'curlyAfro') {
+    const puffOffsets = [
+      [0, r * 0.32, 0, 1.0],
+      [-r * 0.62, r * 0.18, rz * 0.35, 0.72],
+      [r * 0.62, r * 0.18, rz * 0.35, 0.72],
+      [-r * 0.78, -r * 0.12, -rz * 0.05, 0.74],
+      [r * 0.78, -r * 0.12, -rz * 0.05, 0.74],
+      [-r * 0.56, r * 0.12, -rz * 0.58, 0.76],
+      [r * 0.56, r * 0.12, -rz * 0.58, 0.76],
+      [0, r * 0.02, -rz * 0.76, 0.78],
+      [-r * 0.42, -r * 0.45, -rz * 0.65, 0.66],
+      [r * 0.42, -r * 0.45, -rz * 0.65, 0.66],
+      [0, -r * 0.5, -rz * 0.72, 0.68],
+      [-r * 0.32, r * 0.45, rz * 0.1, 0.68],
+      [r * 0.32, r * 0.45, rz * 0.1, 0.68],
+    ];
+    for (const [px, py, pz, pr] of puffOffsets) {
+      const puff = new THREE.Mesh(new THREE.SphereGeometry(r * 0.62 * pr, 14, 12), hairMat);
+      puff.position.set(px, py, pz);
+      puff.castShadow = true;
+      scaleGroup.add(puff);
+    }
+  } else if (style === 'ponytail') {
+    addCap(0.64, -r * 0.34);
+    const tie = new THREE.Mesh(new THREE.TorusGeometry(0.036, 0.012, 8, 14), accentMat);
+    tie.position.set(0, r * 0.2, -rz * 0.96);
+    scaleGroup.add(tie);
+    addStrand(
+      [
+        new THREE.Vector3(0, r * 0.2, -rz * 0.92),
+        new THREE.Vector3(0, r * 0.12, -rz * 1.48),
+        new THREE.Vector3(0, -r * 0.52, -rz * 1.66),
+        new THREE.Vector3(0, -r * 1.15, -rz * 1.45),
+      ],
+      0.056,
+      0.016
+    );
+  } else if (style === 'spikyTufts') {
+    const dirs = [
+      [0, 0.16, 0.06],
+      [0.1, 0.12, 0.03],
+      [-0.1, 0.12, 0.03],
+      [0.06, 0.13, -0.09],
+      [-0.06, 0.13, -0.09],
+    ];
+    for (const [dx, dy, dz] of dirs) {
+      addStrand(
+        [new THREE.Vector3(dx * 0.25, -0.02, dz * 0.25), new THREE.Vector3(dx, dy, dz)],
+        0.044,
+        0.008
+      );
+    }
+  } else if (style === 'mohawk') {
+    for (let i = 0; i < 5; i++) {
+      const z = 0.09 - i * 0.065;
+      addStrand(
+        [new THREE.Vector3(0, -0.02 - i * 0.01, z), new THREE.Vector3(0, 0.14 - i * 0.01, z - 0.04)],
+        0.042,
+        0.008,
+        hairMat,
+        0.55
+      );
+    }
+  } else if (style === 'curlSwirl') {
+    addStrand(
+      [
+        new THREE.Vector3(0, -0.01, 0),
+        new THREE.Vector3(0, 0.1, 0.04),
+        new THREE.Vector3(0, 0.14, 0.11),
+        new THREE.Vector3(0, 0.09, 0.13),
+      ],
+      0.055,
+      0.014
+    );
+  } else if (style === 'mushroomCap') {
+    const dome = new THREE.Mesh(
+      new THREE.SphereGeometry(1, 22, 14, 0, Math.PI * 2, 0, Math.PI * 0.56),
+      hairMat
+    );
+    dome.scale.set(r * 1.65, r * 0.95, rz * 1.65);
+    dome.position.set(0, -r * 0.15, 0);
+    dome.castShadow = true;
+    scaleGroup.add(dome);
+  } else if (style === 'horseMane') {
+    addStrand(
+      [new THREE.Vector3(0, 0.01, 0.02), new THREE.Vector3(0, 0.05, 0.13)],
+      0.04,
+      0.012
+    );
+    for (let i = 0; i < 5; i++) {
+      const f = i / 4;
+      addStrand(
+        [
+          new THREE.Vector3(0, 0.02 - f * 0.24, -rz * 0.72),
+          new THREE.Vector3(0, 0.05 - f * 0.24, -rz * 1.48),
+        ],
+        0.045,
+        0.016,
+        hairMat,
+        0.58
+      );
+    }
+  } else if (style === 'lionMane') {
+    const count = 12;
+    for (let i = 0; i < count; i++) {
+      const a = (i / count) * Math.PI * 2;
+      const puff = new THREE.Mesh(new THREE.SphereGeometry(r * 0.56, 12, 10), hairMat);
+      puff.position.set(Math.sin(a) * r * 1.15, -r * 0.52 + Math.cos(a) * r * 1.05, -rz * 0.15);
+      puff.scale.set(1.0, 1.0, 0.85);
+      puff.castShadow = true;
+      scaleGroup.add(puff);
+    }
+  } else if (style === 'featherTuft') {
+    ([-0.035, 0, 0.035] as const).forEach((xOff, idx) => {
+      addStrand(
+        [
+          new THREE.Vector3(xOff * 0.4, -0.01, 0.02 - idx * 0.015),
+          new THREE.Vector3(xOff * 0.85, 0.11 - Math.abs(idx - 1) * 0.025, -0.04),
+        ],
+        0.026,
+        0.008,
+        hairMat,
+        0.75
+      );
+    });
+  } else if (style === 'fluffyBangs') {
+    for (let b = -1; b <= 1; b++) {
+      const puff = new THREE.Mesh(new THREE.SphereGeometry(r * 0.42, 12, 10), hairMat);
+      puff.scale.set(1.05, 0.78, 0.88);
+      puff.position.set(b * r * 0.42, -r * 0.06, rz * 0.72);
+      puff.castShadow = true;
+      scaleGroup.add(puff);
+    }
+  }
+
+  return rootGroup;
+}
+
+/** Builds per-bone 3D fur tufts / raised scale shingles + dorsal spikes/quills that animate with skeleton & export to GLB */
+function buildSurfaceCoatAndSpikes(
+  bones: THREE.Bone[],
+  bodyGeo: THREE.BufferGeometry,
+  coat: CharacterSurfaceCoatConfig,
+  spikes: CharacterSpikesConfig,
+  headCenterY: number,
+  headCenterZ: number,
+  excludedBones: Set<number>
+): void {
+  const wantCoat = coat.mode !== 'none' && coat.intensity > 0.08;
+  const wantSpikes = spikes.enabled;
+  if (!wantCoat && !wantSpikes) return;
+
+  const posAttr = bodyGeo.attributes.position as THREE.BufferAttribute;
+  const normAttr = bodyGeo.attributes.normal as THREE.BufferAttribute;
+  const colAttr = bodyGeo.attributes.color as THREE.BufferAttribute;
+  const skinIdxAttr = bodyGeo.attributes.skinIndex as THREE.BufferAttribute;
+  const vCount = posAttr.count;
+  if (vCount === 0) return;
+
+  // Precompute bone world inverses once
+  const boneWorldInv = bones.map((b) => new THREE.Matrix4().copy(b.matrixWorld).invert());
+
+  const coatPartsByBone = new Map<number, THREE.BufferGeometry[]>();
+  const spikePartsByBone = new Map<number, THREE.BufferGeometry[]>();
+  const upAxis = new THREE.Vector3(0, 1, 0);
+  const tmpPos = new THREE.Vector3();
+  const tmpNorm = new THREE.Vector3();
+  const tmpColor = new THREE.Color();
+  const coatTipCol = new THREE.Color(coat.tipColor || '#FDE68A');
+  const spikeBaseCol = new THREE.Color(spikes.color || '#292524');
+  const spikeTipCol = new THREE.Color(spikes.tipColor || '#FEF3C7');
+  const qWorld = new THREE.Quaternion();
+  const matLocal = new THREE.Matrix4();
+
+  // Deterministic stride based on vertex count & requested densities
+  if (wantCoat) {
+    const isFur = coat.mode.startsWith('fur');
+    const isClumped = coat.mode === 'furClumped';
+    const isDragon = coat.mode === 'scalesDragon';
+    const isHex = coat.mode === 'scalesHex';
+    const targetSamples = Math.round((isFur ? 420 : 280) * THREE.MathUtils.clamp(coat.density, 0.25, 1.8));
+    const stride = Math.max(1, Math.floor(vCount / Math.max(1, targetSamples)));
+    const tuftH =
+      (coat.mode === 'furLong' ? 0.075 : isClumped ? 0.056 : 0.036) *
+      coat.scaleSize *
+      (0.55 + coat.intensity * 0.65);
+    const tuftW =
+      (isClumped ? 0.018 : isFur ? 0.011 : 0.026 * coat.scaleSize) *
+      (isFur ? coat.scaleSize : 1);
+
+    for (let i = 0; i < vCount; i += stride) {
+      const boneIdx = skinIdxAttr.getX(i);
+      if (excludedBones.has(boneIdx)) continue;
+
+      tmpPos.fromBufferAttribute(posAttr, i);
+      tmpNorm.fromBufferAttribute(normAttr, i).normalize();
+
+      // Protect face & eye/mouth region so fur/scales don't poke out of eyes/lips
+      if (tmpPos.y > headCenterY - 0.14 && tmpPos.z > headCenterZ + 0.015 && tmpNorm.z > 0.22) {
+        continue;
+      }
+
+      tmpColor.setRGB(colAttr.getX(i), colAttr.getY(i), colAttr.getZ(i));
+      const h = hashInt01(i * 97 + 13);
+
+      let partGeo: THREE.BufferGeometry;
+      const dir = new THREE.Vector3();
+
+      if (isFur) {
+        const bladeLen = tuftH * (0.72 + h * 0.56);
+        partGeo = new THREE.ConeGeometry(tuftW, bladeLen, isClumped ? 5 : 4);
+        partGeo.translate(0, bladeLen * 0.42, 0);
+        // Sweep fur tangentially down + slightly out from normal
+        const downBias = coat.mode === 'furLong' ? -0.78 : -0.45;
+        dir.copy(tmpNorm).multiplyScalar(0.55).add(new THREE.Vector3((h - 0.5) * 0.22, downBias, -0.15)).normalize();
+        if (isClumped && h > 0.65) {
+          partGeo.scale(1.45, 1.15, 1.45);
+        }
+        paintGeometryGradient(partGeo, tmpColor, coatTipCol, 0, bladeLen * 0.9);
+      } else {
+        // Raised 3D scale shingle / dragon scute
+        const scLen = 0.036 * coat.scaleSize;
+        partGeo = new THREE.ConeGeometry(tuftW, scLen, isDragon ? 4 : isHex ? 6 : 5);
+        partGeo.scale(1.15, 1, isDragon ? 0.42 : 0.28);
+        partGeo.translate(0, scLen * 0.24, 0);
+        dir.copy(tmpNorm).multiplyScalar(0.45).add(new THREE.Vector3(0, -0.68, -0.12)).normalize();
+        paintGeometryGradient(partGeo, tmpColor, coatTipCol, 0, scLen * 0.6);
+      }
+
+      qWorld.setFromUnitVectors(upAxis, dir);
+      matLocal.compose(tmpPos, qWorld, new THREE.Vector3(1, 1, 1));
+      matLocal.premultiply(boneWorldInv[boneIdx]);
+      partGeo.applyMatrix4(matLocal);
+
+      let list = coatPartsByBone.get(boneIdx);
+      if (!list) {
+        list = [];
+        coatPartsByBone.set(boneIdx, list);
+      }
+      list.push(partGeo);
+    }
+
+    const coatMat = new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      roughness: coat.mode.startsWith('scales') ? 0.34 : 0.85,
+      metalness: coat.mode.startsWith('scales') ? 0.08 : 0.0,
+    });
+    coatPartsByBone.forEach((parts, boneIdx) => {
+      const merged = mergeVertexColoredGeometries(parts);
+      if (merged && bones[boneIdx]) {
+        const mesh = new THREE.Mesh(merged, coatMat);
+        mesh.name = `CharCoat_${boneIdx}`;
+        mesh.castShadow = true;
+        bones[boneIdx].add(mesh);
+      }
+    });
+  }
+
+  if (wantSpikes) {
+    const spikeSamples = Math.round(
+      (spikes.zone === 'fullBody' ? 220 : spikes.zone === 'spine' ? 75 : 140) *
+        THREE.MathUtils.clamp(spikes.density, 0.25, 1.8)
+    );
+    const stride = Math.max(1, Math.floor(vCount / Math.max(1, spikeSamples)));
+    const sweepFrac = THREE.MathUtils.clamp(spikes.sweepDeg / 85, -0.25, 0.95);
+    const sLen = THREE.MathUtils.clamp(spikes.length, 0.04, 0.45);
+    const sRad = 0.02 * THREE.MathUtils.clamp(spikes.thickness, 0.4, 2.2);
+
+    for (let i = 0; i < vCount; i += stride) {
+      const boneIdx = skinIdxAttr.getX(i);
+      if (excludedBones.has(boneIdx)) continue;
+
+      tmpPos.fromBufferAttribute(posAttr, i);
+      tmpNorm.fromBufferAttribute(normAttr, i).normalize();
+
+      // Always protect eyes, brow & front of face
+      if (tmpPos.y > headCenterY - 0.14 && tmpPos.z > headCenterZ - 0.01 && tmpNorm.z > 0.12) {
+        continue;
+      }
+
+      // Filter by requested placement zone
+      if (spikes.zone === 'spine') {
+        const onBackSpine = Math.abs(tmpPos.x) < 0.095 && tmpNorm.z < -0.25;
+        const onCrownRidge = Math.abs(tmpPos.x) < 0.075 && tmpPos.y > headCenterY + 0.03 && tmpNorm.y > 0.35;
+        if (!onBackSpine && !onCrownRidge) continue;
+      } else if (spikes.zone === 'headAndBack') {
+        const onBack = tmpNorm.z < -0.12;
+        const onCrown = tmpPos.y > headCenterY + 0.04 && tmpNorm.y > 0.28;
+        if (!onBack && !onCrown) continue;
+      } else if (spikes.zone === 'shouldersAndBack') {
+        const onBackOrShoulder = tmpNorm.z < -0.15 || (tmpNorm.y > 0.45 && Math.abs(tmpPos.x) > 0.08 && tmpPos.y < headCenterY);
+        if (!onBackOrShoulder) continue;
+      }
+
+      const h = hashInt01(i * 131 + 29);
+      const lenThis = sLen * (0.76 + h * 0.48);
+      let partGeo: THREE.BufferGeometry;
+
+      if (spikes.style === 'dorsalFins') {
+        partGeo = new THREE.ConeGeometry(sRad * 2.1, lenThis * 1.15, 5);
+        partGeo.scale(0.32, 1, 1.9);
+      } else if (spikes.style === 'crystalSpines') {
+        partGeo = new THREE.CylinderGeometry(sRad * 0.25, sRad * 1.05, lenThis, 6);
+      } else if (spikes.style === 'boneSpikes') {
+        partGeo = new THREE.ConeGeometry(sRad * 1.28, lenThis, 7);
+      } else {
+        // Porcupine quills: long slender banded needles
+        partGeo = new THREE.ConeGeometry(sRad * 0.68, lenThis * 1.18, 6);
+      }
+      partGeo.translate(0, lenThis * 0.45, 0);
+      paintGeometryGradient(partGeo, spikeBaseCol, spikeTipCol, 0, lenThis * 0.95);
+
+      const dir = tmpNorm
+        .clone()
+        .lerp(new THREE.Vector3(0, -0.18, -1).normalize(), Math.max(0, sweepFrac))
+        .normalize();
+      if (sweepFrac < 0) {
+        dir.lerp(new THREE.Vector3(0, 1, 0), -sweepFrac).normalize();
+      }
+      qWorld.setFromUnitVectors(upAxis, dir);
+      matLocal.compose(tmpPos, qWorld, new THREE.Vector3(1, 1, 1));
+      matLocal.premultiply(boneWorldInv[boneIdx]);
+      partGeo.applyMatrix4(matLocal);
+
+      let list = spikePartsByBone.get(boneIdx);
+      if (!list) {
+        list = [];
+        spikePartsByBone.set(boneIdx, list);
+      }
+      list.push(partGeo);
+    }
+
+    const spikeMat = new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      roughness: spikes.style === 'crystalSpines' ? 0.16 : 0.48,
+      metalness: spikes.style === 'crystalSpines' ? 0.18 : 0.04,
+      flatShading: spikes.style === 'crystalSpines',
+    });
+    spikePartsByBone.forEach((parts, boneIdx) => {
+      const merged = mergeVertexColoredGeometries(parts);
+      if (merged && bones[boneIdx]) {
+        const mesh = new THREE.Mesh(merged, spikeMat);
+        mesh.name = `CharSpikes_${boneIdx}`;
+        mesh.castShadow = true;
+        bones[boneIdx].add(mesh);
+      }
+    });
+  }
+}
+
+/** Builds optional bone-mounted eyewear, headwear & back/shoulder game gear */
+function buildLayeredAddons(
+  doc: CharacterMakerDoc,
+  ext: ResolvedCharacterExtras,
+  headB: THREE.Bone,
+  chestB: THREE.Bone,
+  neckB: THREE.Bone,
+  crownLocalY: number,
+  headCenterY: number,
+  baseHeadDepthZ: number,
+  attachFromSkullInterior: (
+    skullInteriorOrigin: THREE.Vector3,
+    outwardDir: THREE.Vector3,
+    fallbackExteriorOrigin: THREE.Vector3,
+    object: THREE.Object3D,
+    surfaceBias?: number,
+    normalBlendForward?: number
+  ) => void
+): void {
+  const addons = ext.addons;
+
+  // 1. Eyewear
+  if (addons.eyewear !== 'none') {
+    const ew = new THREE.Group();
+    ew.name = 'CharAddon_Eyewear';
+    ew.scale.setScalar(addons.eyewearScale);
+    const frameMat = new THREE.MeshStandardMaterial({
+      color: addons.eyewearColor,
+      roughness: 0.35,
+      metalness: 0.45,
+    });
+    const lensMat = new THREE.MeshStandardMaterial({
+      color: addons.eyewearLensColor,
+      roughness: 0.12,
+      metalness: 0.15,
+      transparent: true,
+      opacity: addons.eyewear === 'cyberVisor' ? 0.86 : 0.58,
+      emissive: addons.eyewear === 'cyberVisor' ? new THREE.Color(addons.eyewearLensColor) : new THREE.Color('#000000'),
+      emissiveIntensity: addons.eyewear === 'cyberVisor' ? 0.45 : 0,
+    });
+
+    const sp = Math.max(0.036, doc.eyeSpacing);
+    const rad = Math.max(0.026, doc.eyeSize * 1.15);
+
+    if (addons.eyewear === 'roundGlasses' || addons.eyewear === 'goggles') {
+      const tubeR = addons.eyewear === 'goggles' ? rad * 0.28 : 0.0055;
+      ([-1, 1] as const).forEach((s) => {
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(rad, tubeR, 10, 22), frameMat);
+        ring.position.x = s * sp;
+        const lens = new THREE.Mesh(new THREE.CircleGeometry(rad * 0.94, 18), lensMat);
+        lens.position.set(s * sp, 0, 0.002);
+        ew.add(ring, lens);
+      });
+      const bridge = new THREE.Mesh(new THREE.CylinderGeometry(0.0045, 0.0045, Math.max(0.01, (sp - rad) * 2.1), 8), frameMat);
+      bridge.rotation.z = Math.PI * 0.5;
+      ew.add(bridge);
+    } else if (addons.eyewear === 'cyberVisor') {
+      const visorGeo = new THREE.CylinderGeometry(sp * 1.65, sp * 1.65, rad * 1.45, 24, 1, true, -0.78, 1.56);
+      const visor = new THREE.Mesh(visorGeo, lensMat);
+      visor.position.z = -sp * 1.52;
+      const topTrim = new THREE.Mesh(
+        new THREE.CylinderGeometry(sp * 1.68, sp * 1.68, 0.012, 24, 1, true, -0.82, 1.64),
+        frameMat
+      );
+      topTrim.position.set(0, rad * 0.72, -sp * 1.52);
+      ew.add(visor, topTrim);
+    } else if (addons.eyewear === 'monocle') {
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(rad * 1.05, 0.0055, 10, 22), frameMat);
+      ring.position.x = sp;
+      const lens = new THREE.Mesh(new THREE.CircleGeometry(rad * 0.98, 18), lensMat);
+      lens.position.set(sp, 0, 0.002);
+      ew.add(ring, lens);
+    }
+
+    const eyeY = headCenterY + doc.eyeHeight + addons.eyewearOffsetY;
+    const origin = new THREE.Vector3(0, eyeY, doc.headForwardTilt);
+    const fallback = new THREE.Vector3(0, eyeY, baseHeadDepthZ + 0.035);
+    attachFromSkullInterior(origin, new THREE.Vector3(0, 0, 1), fallback, ew, 0.018 + addons.eyewearOffsetZ, 0.85);
+  }
+
+  // 2. HeadGear
+  if (addons.headGear !== 'none') {
+    const hg = new THREE.Group();
+    hg.name = 'CharAddon_HeadGear';
+    hg.position.set(0, crownLocalY + addons.headGearOffsetY, 0);
+    hg.rotation.x = THREE.MathUtils.degToRad(addons.headGearRotX);
+    hg.scale.setScalar(addons.headGearScale);
+    const primMat = new THREE.MeshStandardMaterial({ color: addons.headGearColor, roughness: 0.55 });
+    const accMat = new THREE.MeshStandardMaterial({
+      color: addons.headGearAccentColor,
+      roughness: 0.3,
+      metalness: addons.headGear === 'crown' || addons.headGear === 'halo' ? 0.65 : 0.1,
+      emissive: addons.headGear === 'halo' ? new THREE.Color(addons.headGearAccentColor) : new THREE.Color('#000000'),
+      emissiveIntensity: addons.headGear === 'halo' ? 0.7 : 0,
+    });
+    const r = Math.max(0.11, doc.head.midRadius);
+
+    if (addons.headGear === 'adventurerCap') {
+      const dome = new THREE.Mesh(new THREE.SphereGeometry(r * 1.05, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.52), primMat);
+      dome.position.y = -r * 0.32;
+      dome.castShadow = true;
+      const brim = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.98, r * 1.06, 0.018, 18, 1, false, -0.95, 1.9), accMat);
+      brim.position.set(0, -r * 0.24, r * 0.52);
+      brim.rotation.x = 0.14;
+      hg.add(dome, brim);
+    } else if (addons.headGear === 'wizardHat') {
+      const brim = new THREE.Mesh(new THREE.CylinderGeometry(r * 1.75, r * 1.85, 0.022, 22), primMat);
+      brim.position.y = -r * 0.18;
+      const band = new THREE.Mesh(new THREE.CylinderGeometry(r * 1.04, r * 1.08, 0.045, 18), accMat);
+      band.position.y = -r * 0.14;
+      const cone = new THREE.Mesh(new THREE.ConeGeometry(r * 1.06, 0.34, 18), primMat);
+      cone.position.set(0, r * 0.55, -0.02);
+      cone.rotation.x = -0.15;
+      cone.castShadow = true;
+      hg.add(brim, band, cone);
+    } else if (addons.headGear === 'crown') {
+      const band = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.78, r * 0.72, 0.06, 16, 1, true), accMat);
+      band.material.side = THREE.DoubleSide;
+      band.position.y = -r * 0.04;
+      hg.add(band);
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2;
+        const prong = new THREE.Mesh(new THREE.ConeGeometry(0.024, 0.075, 5), accMat);
+        prong.position.set(Math.sin(a) * r * 0.75, r * 0.18, Math.cos(a) * r * 0.75);
+        const gem = new THREE.Mesh(new THREE.OctahedronGeometry(0.014, 0), primMat);
+        gem.position.set(Math.sin(a) * r * 0.78, -r * 0.02, Math.cos(a) * r * 0.78);
+        hg.add(prong, gem);
+      }
+    } else if (addons.headGear === 'halo') {
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(r * 0.92, 0.016, 10, 28), accMat);
+      ring.rotation.x = Math.PI * 0.5;
+      ring.position.y = r * 0.55;
+      hg.add(ring);
+    } else if (addons.headGear === 'flowerCrown') {
+      const vine = new THREE.Mesh(new THREE.TorusGeometry(r * 1.02, 0.014, 8, 26), new THREE.MeshStandardMaterial({ color: '#16A34A', roughness: 0.75 }));
+      vine.rotation.x = Math.PI * 0.5;
+      vine.position.y = -r * 0.12;
+      hg.add(vine);
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2;
+        const blossom = new THREE.Mesh(new THREE.DodecahedronGeometry(0.028, 0), i % 2 === 0 ? primMat : accMat);
+        blossom.position.set(Math.sin(a) * r * 1.04, -r * 0.11, Math.cos(a) * r * 1.04);
+        hg.add(blossom);
+      }
+    }
+    headB.add(hg);
+  }
+
+  // 3. BodyGear
+  if (addons.bodyGear !== 'none') {
+    const bg = new THREE.Group();
+    bg.name = 'CharAddon_BodyGear';
+    bg.scale.setScalar(addons.bodyGearScale);
+    const primMat = new THREE.MeshStandardMaterial({ color: addons.bodyGearColor, roughness: 0.65 });
+    const accMat = new THREE.MeshStandardMaterial({ color: addons.bodyGearAccentColor, roughness: 0.45 });
+    const torsoZ = -doc.torso.midRadius * (doc.torso.squashZ ?? 0.88) - 0.04;
+    const torsoTopY = doc.torso.length * 0.72;
+
+    if (addons.bodyGear === 'backpack') {
+      const pack = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.28, 0.13, 2, 2, 2), primMat);
+      pack.position.set(0, doc.torso.length * 0.42, torsoZ - 0.04);
+      pack.castShadow = true;
+      const flap = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.08, 0.145), accMat);
+      flap.position.set(0, doc.torso.length * 0.54, torsoZ - 0.04);
+      const roll = new THREE.Mesh(new THREE.CylinderGeometry(0.042, 0.042, 0.26, 12), accMat);
+      roll.rotation.z = Math.PI * 0.5;
+      roll.position.set(0, doc.torso.length * 0.62, torsoZ - 0.04);
+      bg.add(pack, flap, roll);
+      chestB.add(bg);
+    } else if (addons.bodyGear === 'quiver') {
+      const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.042, 0.34, 12), primMat);
+      tube.position.set(0.04, doc.torso.length * 0.48, torsoZ - 0.03);
+      tube.rotation.z = -0.35;
+      tube.castShadow = true;
+      bg.add(tube);
+      for (let i = -1; i <= 1; i++) {
+        const fletch = new THREE.Mesh(new THREE.ConeGeometry(0.018, 0.07, 5), accMat);
+        fletch.position.set(0.04 + i * 0.025 + 0.06, doc.torso.length * 0.68, torsoZ - 0.03);
+        fletch.rotation.z = -0.35;
+        bg.add(fletch);
+      }
+      chestB.add(bg);
+    } else if (addons.bodyGear === 'cape') {
+      const capeGeo = new THREE.CylinderGeometry(0.16, 0.28, doc.torso.length + doc.belly.length + 0.18, 12, 1, true, Math.PI * 0.62, Math.PI * 0.76);
+      const capeMat = new THREE.MeshStandardMaterial({ color: addons.bodyGearColor, roughness: 0.75, side: THREE.DoubleSide });
+      const cape = new THREE.Mesh(capeGeo, capeMat);
+      cape.position.set(0, torsoTopY * 0.36, -0.02);
+      cape.castShadow = true;
+      const clasp = new THREE.Mesh(new THREE.SphereGeometry(0.024, 10, 8), accMat);
+      clasp.position.set(0, torsoTopY * 0.94, doc.torso.midRadius * 0.78);
+      bg.add(cape, clasp);
+      chestB.add(bg);
+    } else if (addons.bodyGear === 'scarf') {
+      const collar = new THREE.Mesh(new THREE.TorusGeometry(doc.neck.startRadius * 1.45, 0.038, 10, 20), primMat);
+      collar.rotation.x = Math.PI * 0.5;
+      collar.position.set(0, 0.02, 0);
+      const tail = new THREE.Mesh(new THREE.BoxGeometry(0.068, 0.24, 0.024), accMat);
+      tail.position.set(doc.neck.startRadius * 0.9, -0.1, doc.neck.startRadius * 0.95);
+      tail.rotation.set(-0.18, 0, -0.12);
+      bg.add(collar, tail);
+      neckB.add(bg);
+    } else if (addons.bodyGear === 'pauldrons') {
+      ([-1, 1] as const).forEach((s) => {
+        const dome = new THREE.Mesh(new THREE.SphereGeometry(0.095, 14, 10, 0, Math.PI * 2, 0, Math.PI * 0.55), primMat);
+        dome.position.set(s * doc.shoulderWidth, doc.torso.length * 0.68, 0);
+        dome.rotation.z = -s * 0.35;
+        dome.castShadow = true;
+        const rim = new THREE.Mesh(new THREE.TorusGeometry(0.094, 0.012, 8, 18), accMat);
+        rim.rotation.x = Math.PI * 0.5;
+        rim.position.copy(dome.position);
+        rim.rotation.z = dome.rotation.z;
+        bg.add(dome, rim);
+      });
+      chestB.add(bg);
+    }
+  }
 }
 
 export function buildCharacterRigAndMesh(
@@ -3642,231 +5030,7 @@ export function buildCharacterRigAndMesh(
     }
   }
 
-  // ---- HAIR / MANE / FEATHER CRESTS ----
-  if (doc.hairStyle !== 'none') {
-    const hairCol = hexToRgbTuple(doc.hairColor);
-    const hs = doc.hairSize;
-    const crownTop = new THREE.Vector3(0, headTopY + doc.head.endRadius * 0.82, doc.headForwardTilt);
-
-    if (doc.hairStyle === 'spikyTufts') {
-      const tuftDirs = [
-        [0, 0.14, 0.05],
-        [0.09, 0.11, 0.02],
-        [-0.09, 0.11, 0.02],
-        [0.05, 0.12, -0.08],
-        [-0.05, 0.12, -0.08],
-      ];
-      for (const d of tuftDirs) {
-        const base = crownTop.clone().add(new THREE.Vector3(d[0] * 0.4, -0.03, d[2] * 0.4));
-        const tip = base.clone().add(new THREE.Vector3(d[0] * hs, d[1] * hs, d[2] * hs));
-        prims.push({
-          kind: 'capsule',
-          a: tupleVec(base),
-          b: tupleVec(tip),
-          startRadius: 0.048 * hs,
-          midRadius: 0.034 * hs,
-          endRadius: 0.006 * hs,
-          curvature: -0.1,
-          blendScale: 0.42,
-          color: hairCol,
-          boneA: headB.index,
-        });
-      }
-    } else if (doc.hairStyle === 'mohawk') {
-      for (let i = 0; i < 4; i++) {
-        const z = 0.09 - i * 0.075;
-        const base = new THREE.Vector3(0, headTopY + doc.head.endRadius * 0.72, doc.headForwardTilt + z);
-        const tip = base.clone().add(new THREE.Vector3(0, 0.13 * hs, -0.03 * hs));
-        prims.push({
-          kind: 'capsule',
-          a: tupleVec(base),
-          b: tupleVec(tip),
-          oval: [0.6, 1.3],
-          startRadius: 0.042 * hs,
-          midRadius: 0.03 * hs,
-          endRadius: 0.007 * hs,
-          curvature: -0.12,
-          blendScale: 0.34,
-          color: hairCol,
-          boneA: headB.index,
-        });
-      }
-    } else if (doc.hairStyle === 'horseMane') {
-      // Forelock tuft + mane ridge cascading down back of head and neck
-      const foreTip = crownTop.clone().add(new THREE.Vector3(0, 0.02 * hs, 0.11 * hs));
-      prims.push({
-        kind: 'capsule',
-        a: tupleVec(crownTop),
-        b: tupleVec(foreTip),
-        startRadius: 0.042 * hs,
-        midRadius: 0.036 * hs,
-        endRadius: 0.012 * hs,
-        curvature: 0.2,
-        blendScale: 0.36,
-        color: hairCol,
-        boneA: headB.index,
-      });
-      for (let i = 0; i < 4; i++) {
-        const f = i / 3;
-        const mY = THREE.MathUtils.lerp(headTopY + 0.06, neckBaseY + 0.02, f);
-        const mZ = doc.headForwardTilt * (1 - f * 0.7) - doc.head.midRadius * 0.82;
-        const mBase = new THREE.Vector3(0, mY, mZ);
-        const mTip = new THREE.Vector3(0, mY + 0.02, mZ - 0.11 * hs);
-        prims.push({
-          kind: 'capsule',
-          a: tupleVec(mBase),
-          b: tupleVec(mTip),
-          oval: [0.55, 1.25],
-          startRadius: 0.048 * hs,
-          midRadius: 0.044 * hs,
-          endRadius: 0.016 * hs,
-          curvature: 0.2,
-          blendScale: 0.38,
-          color: hairCol,
-          boneA: i < 2 ? headB.index : neckB.index,
-        });
-      }
-    } else if (doc.hairStyle === 'lionMane') {
-      // Plush collar of 10 overlapping ruff puffs framing the face
-      const ruffCount = 10;
-      const ringR = doc.head.midRadius * 1.12;
-      for (let i = 0; i < ruffCount; i++) {
-        const a = (i / ruffCount) * Math.PI * 2;
-        const rx = Math.sin(a) * ringR * 1.1;
-        const ry = headCenterY + Math.cos(a) * ringR * 1.02;
-        prims.push({
-          kind: 'ellipsoid',
-          a: [rx, ry, doc.headForwardTilt - 0.035],
-          b: [0.088 * hs, 0.088 * hs, 0.072 * hs],
-          startRadius: 0.08,
-          midRadius: 0.08,
-          endRadius: 0.08,
-          curvature: 0,
-          blendScale: 0.48,
-          color: hairCol,
-          boneA: headB.index,
-        });
-      }
-    } else if (doc.hairStyle === 'featherTuft') {
-      // Cute 3-feather bird crest on crown
-      [-0.035, 0, 0.035].forEach((xOff, i) => {
-        const b = crownTop.clone().add(new THREE.Vector3(xOff * 0.4, -0.015, 0.02 - i * 0.015));
-        const tip = b.clone().add(new THREE.Vector3(xOff * 0.8, (0.095 - Math.abs(i - 1) * 0.02) * hs, -0.04));
-        prims.push({
-          kind: 'capsule',
-          a: tupleVec(b),
-          b: tupleVec(tip),
-          oval: [0.85, 0.55],
-          startRadius: 0.024 * hs,
-          midRadius: 0.028 * hs,
-          endRadius: 0.008 * hs,
-          curvature: 0.2,
-          blendScale: 0.34,
-          color: hairCol,
-          boneA: headB.index,
-        });
-      });
-    } else if (doc.hairStyle === 'fluffyBangs') {
-      for (let b = -1; b <= 1; b++) {
-        prims.push({
-          kind: 'ellipsoid',
-          a: [b * 0.055 * hs, headTopY + 0.035, doc.headForwardTilt + doc.head.midRadius * 0.55],
-          b: [0.058 * hs, 0.044 * hs, 0.048 * hs],
-          startRadius: 0.05,
-          midRadius: 0.05,
-          endRadius: 0.05,
-          curvature: 0,
-          blendScale: 0.38,
-          color: hairCol,
-          boneA: headB.index,
-        });
-      }
-    } else if (doc.hairStyle === 'curlSwirl') {
-      const p1 = crownTop.clone().add(new THREE.Vector3(0, 0.09 * hs, 0.04 * hs));
-      const p2 = p1.clone().add(new THREE.Vector3(0, 0.03 * hs, 0.08 * hs));
-      prims.push(
-        {
-          kind: 'capsule',
-          a: tupleVec(crownTop),
-          b: tupleVec(p1),
-          startRadius: 0.062 * hs,
-          midRadius: 0.056 * hs,
-          endRadius: 0.044 * hs,
-          curvature: 0.3,
-          blendScale: 0.5,
-          color: hairCol,
-          boneA: headB.index,
-        },
-        {
-          kind: 'capsule',
-          a: tupleVec(p1),
-          b: tupleVec(p2),
-          startRadius: 0.044 * hs,
-          midRadius: 0.032 * hs,
-          endRadius: 0.012 * hs,
-          curvature: 0.2,
-          blendScale: 0.42,
-          color: hairCol,
-          boneA: headB.index,
-        }
-      );
-    } else if (doc.hairStyle === 'ponytail') {
-      prims.push({
-        kind: 'ellipsoid',
-        a: [0, headTopY + doc.head.endRadius * 0.35, doc.headForwardTilt - 0.02],
-        b: [doc.head.endRadius * 1.05, doc.head.endRadius * 0.72, doc.head.endRadius * 1.08],
-        startRadius: 0.1,
-        midRadius: 0.1,
-        endRadius: 0.1,
-        curvature: 0,
-        blendScale: 0.45,
-        color: hairCol,
-        boneA: headB.index,
-      });
-      const tailRoot = new THREE.Vector3(0, headCenterY + 0.06, doc.headForwardTilt - doc.head.midRadius * 0.88);
-      const tailMid = tailRoot.clone().add(new THREE.Vector3(0, -0.05 * hs, -0.11 * hs));
-      const tailTip = tailMid.clone().add(new THREE.Vector3(0, -0.15 * hs, -0.05 * hs));
-      prims.push(
-        {
-          kind: 'capsule',
-          a: tupleVec(tailRoot),
-          b: tupleVec(tailMid),
-          startRadius: 0.045 * hs,
-          midRadius: 0.062 * hs,
-          endRadius: 0.05 * hs,
-          curvature: 0.3,
-          blendScale: 0.42,
-          color: hairCol,
-          boneA: headB.index,
-        },
-        {
-          kind: 'capsule',
-          a: tupleVec(tailMid),
-          b: tupleVec(tailTip),
-          startRadius: 0.05 * hs,
-          midRadius: 0.038 * hs,
-          endRadius: 0.012 * hs,
-          curvature: 0.1,
-          blendScale: 0.42,
-          color: hairCol,
-          boneA: headB.index,
-        }
-      );
-    } else if (doc.hairStyle === 'mushroomCap') {
-      prims.push({
-        kind: 'ellipsoid',
-        a: [0, headTopY + doc.head.endRadius * 0.65, doc.headForwardTilt],
-        b: [doc.head.midRadius * 1.55 * hs, 0.11 * hs, doc.head.midRadius * 1.55 * hs],
-        startRadius: 0.15,
-        midRadius: 0.15,
-        endRadius: 0.15,
-        curvature: 0,
-        blendScale: 0.4,
-        color: hairCol,
-        boneA: headB.index,
-      });
-    }
-  }
+  // Hair is now built purely as a layered transformable head attachment after polygonization (never fused into the skull SDF).
 
   // ---- WINGS (Dragon, Bat, Rounded Bird, Soaring Eagle, Long Crane, Angel, Fairy & Butterfly) ----
   if (doc.wingStyle !== 'none') {
@@ -4130,6 +5294,19 @@ export function buildCharacterRigAndMesh(
   const mcResult = polygonizeSdfToGeometry(evaluator, bones.length, resolution);
 
   const bodyMat = createClayMaterial(doc.materialFinish);
+  const coatTextures = createSurfaceCoatTextures(ext.surfaceCoat);
+  if (coatTextures) {
+    bodyMat.map = coatTextures.map;
+    bodyMat.bumpMap = coatTextures.bumpMap;
+    bodyMat.bumpScale = coatTextures.bumpScale;
+    bodyMat.roughnessMap = coatTextures.roughnessMap;
+    if (ext.surfaceCoat.mode.startsWith('scales')) {
+      bodyMat.roughness = 0.42;
+      bodyMat.metalness = 0.08;
+    } else {
+      bodyMat.roughness = 0.88;
+    }
+  }
   const skinnedMesh = new THREE.SkinnedMesh(mcResult.geometry, bodyMat);
   skinnedMesh.name = 'OrganicBodyMesh';
   skinnedMesh.castShadow = true;
@@ -4139,6 +5316,36 @@ export function buildCharacterRigAndMesh(
   root.updateMatrixWorld(true);
   const skeleton = new THREE.Skeleton(bones);
   skinnedMesh.bind(skeleton);
+
+  // 4b. Attach layered Hair Studio object directly to Head Bone
+  const crownLocalY = (headTopY + doc.head.endRadius * 0.55) - headCenterY;
+  const layeredHair = buildLayeredHairGroup(
+    doc,
+    ext,
+    crownLocalY,
+    doc.head.midRadius * (doc.head.squashX ?? 1),
+    doc.head.midRadius * (doc.head.squashZ ?? 1.04)
+  );
+  if (layeredHair) {
+    headB.bone.add(layeredHair);
+  }
+
+  // 4c. Attach bone-skinned 3D fur tufts / scale shingles & dorsal spikes/quills
+  const excludedCoatBones = new Set<number>([
+    lHandB.index,
+    rHandB.index,
+    lFootB.index,
+    rFootB.index,
+  ]);
+  buildSurfaceCoatAndSpikes(
+    bones,
+    mcResult.geometry,
+    ext.surfaceCoat,
+    ext.spikes,
+    headCenterY,
+    doc.headForwardTilt,
+    excludedCoatBones
+  );
 
   // 5. Surface-Mounted Facial Features (Parented to Head Bone)
   const eyelidsOut: BuiltCharacterAsset['eyelids'] = [];
@@ -4572,6 +5779,19 @@ export function buildCharacterRigAndMesh(
       );
     }
   }
+
+  // 5b. Layered Bone-Mounted Fun Addons (Eyewear, Headwear & Back/Shoulder Gear)
+  buildLayeredAddons(
+    doc,
+    ext,
+    headB.bone,
+    chestB.bone,
+    neckB.bone,
+    crownLocalY,
+    headCenterY,
+    baseHeadDepthZ,
+    attachFromSkullInterior
+  );
 
   root.updateMatrixWorld(true);
 

@@ -731,7 +731,11 @@ export const EditorShell: React.FC<{ store: MakerStore }> = ({ store }) => {
           <CanopyEngineModal
             store={store}
             initialAssetId={store.treeMakerTargetAssetId}
-            onClose={() => store.setTreeMakerOpen(false)}
+            initialSpecies={store.treeMakerInitialSpecies}
+            onClose={() => {
+              store.setTreeMakerInitialSpecies(null);
+              store.setTreeMakerOpen(false);
+            }}
             onOpenVertexPainter={() => {
               store.setTreeMakerOpen(false);
               store.setVertexPaintTarget('forestTree');

@@ -7,6 +7,7 @@ import {
   MessageCircle,
   Mountain,
   Paintbrush,
+  Pencil,
   Plus,
   Route,
   Save,
@@ -93,6 +94,14 @@ import {
   type WorldMapBrushMode,
 } from '../../utils/worldMap';
 import { isSavePlinthEntity } from '../../utils/worldMapFog';
+import {
+  clearDefaultTreeStyle,
+  getTreeStyleChoiceCatalog,
+  saveDefaultTreeStyle,
+  setAutoApplyDefaultTreeStyles,
+  useDefaultTreeStyles,
+  type SpawnTreeCategory,
+} from '../../utils/defaultTreeStyles';
 import { AssetThumbnail } from '../shared/AssetThumbnail';
 import { CanopyTreeInspector } from '../shared/CanopyTreeInspector';
 import { FxEmitterInspector } from '../shared/FxEmitterInspector';
@@ -200,6 +209,8 @@ export const WorldDomainInspector: React.FC<WorldDomainInspectorProps> = ({
   const [savingBuildingAsset, setSavingBuildingAsset] = useState(false);
   const [savedBuildingAssetNote, setSavedBuildingAssetNote] = useState<string | null>(null);
   const [newLandName, setNewLandName] = useState('');
+  const [appliedTreeDefaultsNote, setAppliedTreeDefaultsNote] = useState<'current' | 'all' | null>(null);
+  const defaultTreePrefs = useDefaultTreeStyles();
 
   const domain = store.activeWorldDomain;
   const terrain = useMemo(
@@ -1666,6 +1677,138 @@ export const WorldDomainInspector: React.FC<WorldDomainInspectorProps> = ({
             <Sprout size={13} />
             <span>Plant Maker</span>
           </button>
+        </div>
+
+        {/* Persistent Default Spawn Tree Styles */}
+        <div className="p-3 rounded-2xl bg-slate-100 dark:bg-[#1F2430] space-y-2.5">
+          <div className="flex items-center justify-between gap-2">
+            <FieldLabel text="Default Spawn Trees" />
+            <label className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-slate-600 dark:text-[#949BB0] cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={defaultTreePrefs.autoApplyOnNewMaps}
+                onChange={(e) => setAutoApplyDefaultTreeStyles(e.target.checked)}
+                className="accent-[#20B46A]"
+              />
+              <span>Auto on new maps</span>
+            </label>
+          </div>
+          <p className="text-[11px] text-slate-500 dark:text-[#949BB0] leading-snug">
+            Pick your default styles so newly spawned trees &amp; lands always use them.
+          </p>
+
+          {(
+            [
+              { slot: 'conifer', title: 'Conifers' },
+              { slot: 'oak', title: 'Oaks' },
+              { slot: 'birch', title: 'Birches' },
+            ] as { slot: SpawnTreeCategory; title: string }[]
+          ).map(({ slot, title }) => {
+            const savedEntry = defaultTreePrefs.species[slot];
+            const catalog = getTreeStyleChoiceCatalog(slot, store.customAssets);
+            const stylizedItems = catalog.filter((c) => c.group === 'stylized');
+            const ezItems = catalog.filter((c) => c.group === 'ezTree');
+            const assetItems = catalog.filter((c) => c.group === 'customAsset');
+            const currentSelectValue = savedEntry
+              ? savedEntry.presetId && catalog.some((c) => c.id === savedEntry.presetId)
+                ? savedEntry.presetId
+                : '__custom__'
+              : '';
+
+            return (
+              <div key={slot} className="space-y-1">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-bold text-slate-700 dark:text-slate-200">
+                    {title}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => store.openTreeMaker(undefined, slot)}
+                    className="inline-flex items-center gap-1 text-[11px] font-bold text-[#20B46A] hover:underline"
+                    title={`Customize ${title} in Tree Maker`}
+                  >
+                    <Pencil size={10} />
+                    <span>Edit in Studio</span>
+                  </button>
+                </div>
+                <select
+                  value={currentSelectValue}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (!val) {
+                      clearDefaultTreeStyle(slot);
+                      return;
+                    }
+                    if (val === '__custom__') return;
+                    const picked = catalog.find((c) => c.id === val);
+                    if (!picked) return;
+                    saveDefaultTreeStyle(slot, picked.buildConfig(), picked.label, picked.id);
+                    store.applyDefaultTreeStylesToLevels('current');
+                  }}
+                  className="w-full px-2.5 py-1.5 rounded-xl bg-white dark:bg-[#171A23] border border-slate-200/80 dark:border-white/[0.08] text-xs font-semibold focus:outline-none focus:border-[#20B46A]"
+                >
+                  <option value="">Built-in Default</option>
+                  {savedEntry && currentSelectValue === '__custom__' && (
+                    <option value="__custom__">Custom · {savedEntry.label}</option>
+                  )}
+                  {stylizedItems.length > 0 && (
+                    <optgroup label="Stylized Canopy Styles">
+                      {stylizedItems.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.label}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                  {ezItems.length > 0 && (
+                    <optgroup label="EZ-Tree Branching Styles">
+                      {ezItems.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.label}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                  {assetItems.length > 0 && (
+                    <optgroup label="Your Saved Tree Assets">
+                      {assetItems.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.label}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                </select>
+              </div>
+            );
+          })}
+
+          {Object.keys(defaultTreePrefs.species).length > 0 && (
+            <div className="grid grid-cols-2 gap-1.5 pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  store.applyDefaultTreeStylesToLevels('current');
+                  setAppliedTreeDefaultsNote('current');
+                  window.setTimeout(() => setAppliedTreeDefaultsNote(null), 2000);
+                }}
+                className="py-1.5 px-2 rounded-xl bg-white dark:bg-[#171A23] hover:border-[#20B46A] border border-slate-200/80 dark:border-white/[0.08] text-[11px] font-bold transition-colors"
+              >
+                {appliedTreeDefaultsNote === 'current' ? 'Applied Here' : 'Apply to Land'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  store.applyDefaultTreeStylesToLevels('all');
+                  setAppliedTreeDefaultsNote('all');
+                  window.setTimeout(() => setAppliedTreeDefaultsNote(null), 2000);
+                }}
+                className="py-1.5 px-2 rounded-xl bg-[#20B46A] hover:bg-[#1A9A59] text-white text-[11px] font-bold transition-colors"
+              >
+                {appliedTreeDefaultsNote === 'all' ? 'Applied to All' : 'Apply to All Lands'}
+              </button>
+            </div>
+          )}
         </div>
       </aside>
     );

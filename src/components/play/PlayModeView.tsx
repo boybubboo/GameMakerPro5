@@ -99,6 +99,7 @@ import {
   PlatformMotion,
   resolveHorizontalCollision,
   sampleLevelHeight,
+  terrainHasMainMountainCave,
   type CollisionFilterContext,
 } from '../../utils/terrain';
 import { readJsHeapUsageMB } from '../../utils/resourceMonitor';
@@ -1725,7 +1726,7 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
         : 52,
       (container.clientWidth || 800) / Math.max(1, container.clientHeight || 600),
       0.15,
-      1250
+      2400
     );
 
     const hemi = new THREE.HemisphereLight('#B8E4FF', '#5F7844', 0.75);
@@ -2056,6 +2057,8 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
         heroRoot = heroCustom.group;
       } else {
         heroRig = buildHeroModel(activeProject.heroBody, activeProject.heroColors);
+        heroRig.group.scale.setScalar(Math.max(0.25, Math.min(3.5, activeProject.heroModelScale ?? 1)));
+        heroRig.group.position.y = activeProject.heroModelOffsetY ?? 0;
         applyVisualStyleToObject(heroRig.group, style);
         heroRoot = heroRig.group;
       }
@@ -7458,7 +7461,10 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
         }
 
         // Smoothly pull camera inside the cavern when hero enters MountainCave so mountain roof never blocks view
-        const heroInCave = env === 'openWorld' && isInsideMountainCave(heroX, heroZ);
+        const heroInCave =
+          env === 'openWorld' &&
+          terrainHasMainMountainCave(activeLevel.terrain) &&
+          isInsideMountainCave(heroX, heroZ);
         if (heroInCave && !shownCaveTip && !pausedNow) {
           shownCaveTip = true;
           showToast('Entered the Mountain Cave');

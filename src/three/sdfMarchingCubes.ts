@@ -638,6 +638,7 @@ export function polygonizeSdfToGeometry(
   const edgeVertexMap = new Map<number, number>();
   const positions: number[] = [];
   const normals: number[] = [];
+  const uvs: number[] = [];
   const colors: number[] = [];
   const skinIndices: number[] = [];
   const skinWeights: number[] = [];
@@ -677,6 +678,15 @@ export function polygonizeSdfToGeometry(
     const vIdx = positions.length / 3;
     positions.push(px, py, pz);
     normals.push(nxv, nyv, nzv);
+
+    // Seamless symmetric UV projection (no back seam jump; smooth pole blend on crowns/shoulders)
+    const radialXZ = Math.hypot(px, pz);
+    const uAz = Math.abs(Math.atan2(px, pz)) / Math.PI;
+    const uPlanar = 0.5 + THREE.MathUtils.clamp(px * 1.8, -0.5, 0.5);
+    const poleBlend = THREE.MathUtils.smoothstep(radialXZ, 0.015, 0.08);
+    const u = THREE.MathUtils.lerp(uPlanar, uAz, poleBlend);
+    const v = (py - bounds.min.y) * 1.35 + (1 - poleBlend) * Math.abs(pz) * 0.6;
+    uvs.push(u, v);
 
     // Store linear RGB for MeshStandardMaterial vertexColors
     tmpColor.setRGB(color[0], color[1], color[2], THREE.SRGBColorSpace);
@@ -758,6 +768,7 @@ export function polygonizeSdfToGeometry(
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
   geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
   geometry.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(skinIndices, 4));
   geometry.setAttribute('skinWeight', new THREE.Float32BufferAttribute(skinWeights, 4));

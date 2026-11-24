@@ -5,6 +5,7 @@ import { uniform } from 'three/tsl';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
   Apple,
+  Check,
   Cloud,
   Dices,
   Eye,
@@ -14,6 +15,7 @@ import {
   Paintbrush,
   Palette,
   Plus,
+  RotateCcw,
   RotateCw,
   Save,
   Sparkles,
@@ -49,6 +51,12 @@ import {
   type LeafSeasonPresetMeta,
 } from '../../data/canopyEnginePresets';
 import type { MakerStore } from '../../store/useMakerStore';
+import {
+  buildCanopyConfigFromUserDefaults,
+  clearDefaultTreeStyle,
+  saveDefaultTreeStyle,
+  useDefaultTreeStyles,
+} from '../../utils/defaultTreeStyles';
 import {
   buildSingleCanopyTreeGroup,
   computeWeatherWindFactor,
@@ -365,6 +373,7 @@ const CONIFER_PALETTES: {
 interface CanopyEngineModalProps {
   store: MakerStore;
   initialAssetId?: string | null;
+  initialSpecies?: TreeSpeciesType | null;
   onClose: () => void;
   onOpenVertexPainter?: () => void;
 }
@@ -372,10 +381,12 @@ interface CanopyEngineModalProps {
 export const CanopyEngineModal: React.FC<CanopyEngineModalProps> = ({
   store,
   initialAssetId = null,
+  initialSpecies = null,
   onClose,
   onOpenVertexPainter,
 }) => {
   const { currentLevel, customAssets } = store;
+  const defaultTreePrefs = useDefaultTreeStyles();
   const [activeTab, setActiveTab] = useState<StudioTab>('base');
   const [uploadingSlot, setUploadingSlot] = useState<UploadSlot | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -383,6 +394,8 @@ export const CanopyEngineModal: React.FC<CanopyEngineModalProps> = ({
   const [baseOnlyPreview, setBaseOnlyPreview] = useState(false);
   const [previewWindMode, setPreviewWindMode] = useState<PreviewWindMode>('level');
   const [savedTreePresetNote, setSavedTreePresetNote] = useState(false);
+  const [savedDefaultNote, setSavedDefaultNote] = useState<string | null>(null);
+  const [appliedAllNote, setAppliedAllNote] = useState(false);
   const [editingAssetId, setEditingAssetId] = useState<string | null>(initialAssetId);
   const [treeAssetName, setTreeAssetName] = useState<string>('Stylized Tree');
   const [savingTreeAsset, setSavingTreeAsset] = useState(false);
@@ -454,9 +467,13 @@ export const CanopyEngineModal: React.FC<CanopyEngineModalProps> = ({
   }, []);
 
   const rawCfg = currentLevel?.canopyEngine;
-  const activeSpecies: TreeSpeciesType = rawCfg?.treeType ?? 'oak';
-  const cfg: StylizedCanopyConfig = rawCfg
-    ? { ...createDefaultSpeciesConfig(activeSpecies), ...rawCfg }
+  const defaultSeededCfg = rawCfg
+    ? undefined
+    : buildCanopyConfigFromUserDefaults(undefined);
+  const effectiveRaw = rawCfg ?? defaultSeededCfg;
+  const activeSpecies: TreeSpeciesType = effectiveRaw?.treeType ?? 'oak';
+  const cfg: StylizedCanopyConfig = effectiveRaw
+    ? { ...createDefaultSpeciesConfig(activeSpecies), ...effectiveRaw }
     : createDefaultCanopyConfig();
   const cfgRef = useRef(cfg);
   cfgRef.current = cfg;
@@ -472,8 +489,9 @@ export const CanopyEngineModal: React.FC<CanopyEngineModalProps> = ({
     store.updateLevel(
       label,
       (lvl) => {
-        const prev = lvl.canopyEngine
-          ? { ...createDefaultSpeciesConfig(lvl.canopyEngine.treeType ?? 'oak'), ...lvl.canopyEngine }
+        const seeded = lvl.canopyEngine ?? buildCanopyConfigFromUserDefaults(undefined);
+        const prev = seeded
+          ? { ...createDefaultSpeciesConfig(seeded.treeType ?? 'oak'), ...seeded }
           : createDefaultCanopyConfig();
         const next: StylizedCanopyConfig = {
           ...prev,
@@ -517,6 +535,14 @@ export const CanopyEngineModal: React.FC<CanopyEngineModalProps> = ({
     }
   }, [initialAssetId]);
 
+  useEffect(() => {
+    if (initialAssetId || !initialSpecies) return;
+    if (initialSpecies !== activeSpecies) {
+      switchSpecies(initialSpecies);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialSpecies, initialAssetId]);
+
   const setTreePaintStrokes = (
     updater: (prev: VertexPaintStroke[]) => VertexPaintStroke[],
     label = 'paint tree vertices',
@@ -536,8 +562,9 @@ export const CanopyEngineModal: React.FC<CanopyEngineModalProps> = ({
     store.updateLevel(
       `switch tree type to ${nextSpecies}`,
       (lvl) => {
-        const prev = lvl.canopyEngine
-          ? { ...createDefaultSpeciesConfig(lvl.canopyEngine.treeType ?? 'oak'), ...lvl.canopyEngine }
+        const seeded = lvl.canopyEngine ?? buildCanopyConfigFromUserDefaults(undefined);
+        const prev = seeded
+          ? { ...createDefaultSpeciesConfig(seeded.treeType ?? 'oak'), ...seeded }
           : createDefaultCanopyConfig();
         const prevSp: TreeSpeciesType = prev.treeType ?? 'oak';
         const savedProfiles = {
@@ -1358,6 +1385,7 @@ export const CanopyEngineModal: React.FC<CanopyEngineModalProps> = ({
             </span>
             {TREE_SPECIES_OPTIONS.map((sp) => {
               const isSelected = activeSpecies === sp.id;
+              const hasDefaultSaved = Boolean(defaultTreePrefs.species[sp.id]);
               const label =
                 sp.id === 'custom' && cfg.customTypeName?.trim()
                   ? cfg.customTypeName.trim()
@@ -1367,19 +1395,101 @@ export const CanopyEngineModal: React.FC<CanopyEngineModalProps> = ({
                   key={sp.id}
                   type="button"
                   onClick={() => switchSpecies(sp.id)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition-colors whitespace-nowrap ${
+                  title={
+                    hasDefaultSaved
+                      ? `${label} (Custom default style saved)`
+                      : label
+                  }
+                  className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-extrabold transition-colors whitespace-nowrap ${
                     isSelected
                       ? 'bg-[#20B46A] text-white shadow-sm'
                       : 'bg-white dark:bg-[#1C212D] text-slate-700 dark:text-[#C8D0E4] border border-slate-200/80 dark:border-white/[0.08] hover:border-[#20B46A]'
                   }`}
                 >
-                  {label}
+                  <span>{label}</span>
+                  {hasDefaultSaved && (
+                    <Check
+                      size={11}
+                      className={isSelected ? 'text-white' : 'text-[#20B46A]'}
+                    />
+                  )}
                 </button>
               );
             })}
           </div>
 
-          <div className="flex items-center gap-2.5 flex-wrap">
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Save / Apply Default Spawn Style for this Species */}
+            <div className="inline-flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => {
+                  const styleSummary =
+                    cfg.treeGeneratorMode === 'ezTree'
+                      ? `EZ-Tree ${
+                          EZ_TREE_PRESETS.find((p) => p.id === cfg.ezTree?.presetId)?.name ??
+                          activeSpeciesLabel
+                        }`
+                      : activeSpecies === 'conifer'
+                      ? CONIFER_SHAPE_OPTIONS.find((c) => c.id === cfg.coniferShape)?.label ??
+                        'Custom Conifer'
+                      : activeSpecies === 'birch'
+                      ? 'Custom Birch'
+                      : `Custom ${activeSpeciesLabel}`;
+                  saveDefaultTreeStyle(activeSpecies, cfg, styleSummary);
+                  if (!cfg.enabled) {
+                    updateConfig(
+                      { enabled: true, targetTrees: cfg.targetTrees === 'placedOnly' ? 'matching' : cfg.targetTrees },
+                      `set default ${activeSpeciesLabel}`,
+                      true
+                    );
+                  }
+                  setSavedDefaultNote(activeSpeciesLabel);
+                  window.setTimeout(() => setSavedDefaultNote(null), 2400);
+                }}
+                title={`Always spawn ${activeSpeciesLabel} trees with this look on new maps & islands`}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-extrabold border transition-colors whitespace-nowrap ${
+                  savedDefaultNote === activeSpeciesLabel
+                    ? 'bg-[#20B46A] border-[#20B46A] text-white'
+                    : 'bg-white dark:bg-[#1C212D] border-[#20B46A]/45 text-[#20B46A] hover:bg-[#20B46A]/10'
+                }`}
+              >
+                <Check size={12} />
+                <span>
+                  {savedDefaultNote === activeSpeciesLabel
+                    ? `Saved ${activeSpeciesLabel} Default`
+                    : `Set as Default ${activeSpeciesLabel}`}
+                </span>
+              </button>
+
+              {defaultTreePrefs.species[activeSpecies] && (
+                <button
+                  type="button"
+                  onClick={() => clearDefaultTreeStyle(activeSpecies)}
+                  title={`Clear custom default for ${activeSpeciesLabel}`}
+                  className="p-1.5 rounded-lg bg-white dark:bg-[#1C212D] border border-slate-200/80 dark:border-white/[0.08] text-slate-500 hover:text-red-500 transition-colors"
+                  aria-label={`Reset default ${activeSpeciesLabel}`}
+                >
+                  <RotateCcw size={12} />
+                </button>
+              )}
+
+              {Object.keys(defaultTreePrefs.species).length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    store.applyDefaultTreeStylesToLevels('all');
+                    setAppliedAllNote(true);
+                    window.setTimeout(() => setAppliedAllNote(false), 2200);
+                  }}
+                  title="Apply your saved default tree styles across every land & level in this game"
+                  className="px-2.5 py-1.5 rounded-lg bg-white dark:bg-[#1C212D] border border-slate-200/80 dark:border-white/[0.08] hover:border-[#20B46A] text-[11px] font-bold text-slate-700 dark:text-[#C8D0E4] whitespace-nowrap transition-colors"
+                >
+                  {appliedAllNote ? 'Applied to All Lands' : 'Apply to All Lands'}
+                </button>
+              )}
+            </div>
+
             {/* Generator Engine Switcher: Stylized Canopy vs EZ-Tree Branching */}
             <div className="inline-flex items-center p-0.5 rounded-lg bg-white dark:bg-[#1C212D] border border-slate-200/80 dark:border-white/[0.08]">
               {([

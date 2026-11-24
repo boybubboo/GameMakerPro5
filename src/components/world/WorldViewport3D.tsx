@@ -86,6 +86,7 @@ import {
   updateEntityMaterialVariantInPlace,
 } from '../../three/nodeMaterialUtils';
 import { runDeferredChunks } from '../../utils/deferredLoader';
+import { getDefaultTreeStylesSignature, useDefaultTreeStyles } from '../../utils/defaultTreeStyles';
 import { readJsHeapUsageMB } from '../../utils/resourceMonitor';
 import { isSavePlinthEntity } from '../../utils/worldMapFog';
 
@@ -282,6 +283,7 @@ export const WorldViewport3D: React.FC<WorldViewport3DProps> = ({
   onPickBuildingCurvePoint,
 }) => {
   const mountRef = useRef<HTMLDivElement | null>(null);
+  const defaultTreePrefs = useDefaultTreeStyles();
   const [texInvalidationTick, setTexInvalidationTick] = useState(0);
   const [sculptFinalizeNonce, setSculptFinalizeNonce] = useState(0);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -2081,6 +2083,7 @@ export const WorldViewport3D: React.FC<WorldViewport3DProps> = ({
     level.visualStyle,
     level.sky,
     level.fog,
+    level.vistaHeightFog,
     level.sunAngle,
     level.timeOfDay,
     level.cloudDensity,
@@ -2259,8 +2262,13 @@ export const WorldViewport3D: React.FC<WorldViewport3DProps> = ({
       level.visualStyle ?? 'painterlyPBR',
       level.vistaPreset ?? '',
       level.vistaDensity ?? 0.85,
-      level.vistaItems?.length ?? 0,
+      level.vistaTreeDensity ?? null,
+      level.vistaMountainScale ?? 1,
+      level.vistaDistance ?? 0,
+      level.vistaTreeScale ?? 1,
+      level.vistaItems ?? null,
       level.canopyEngine,
+      getDefaultTreeStylesSignature(),
       level.sceneryTextures,
       grassFieldKey,
       pebbleSig,
@@ -2361,8 +2369,13 @@ export const WorldViewport3D: React.FC<WorldViewport3DProps> = ({
     level.visualStyle,
     level.vistaPreset,
     level.vistaDensity,
+    level.vistaTreeDensity,
+    level.vistaMountainScale,
+    level.vistaDistance,
+    level.vistaTreeScale,
     level.vistaItems,
     level.canopyEngine,
+    defaultTreePrefs,
     level.sceneryTextures,
     level.grass?.quality,
     level.grass?.viewDistance,
@@ -2634,11 +2647,15 @@ export const WorldViewport3D: React.FC<WorldViewport3DProps> = ({
             refs.customUpdaters.push((stepDt) => inst.update(stepDt));
           } else {
             const heroRig = buildHeroModel(project.heroBody, project.heroColors);
+            heroRig.group.scale.setScalar(Math.max(0.25, Math.min(3.5, project.heroModelScale ?? 1)));
+            heroRig.group.position.y = project.heroModelOffsetY ?? 0;
             applyVisualStyleToObject(heroRig.group, style);
             heroAnchor.add(heroRig.group);
           }
         } else {
           const heroRig = buildHeroModel(project.heroBody, project.heroColors);
+          heroRig.group.scale.setScalar(Math.max(0.25, Math.min(3.5, project.heroModelScale ?? 1)));
+          heroRig.group.position.y = project.heroModelOffsetY ?? 0;
           applyVisualStyleToObject(heroRig.group, style);
           heroAnchor.add(heroRig.group);
           void loadCustomAssetToCache(heroAssetId, 'character').then((loaded) => {
@@ -2662,6 +2679,8 @@ export const WorldViewport3D: React.FC<WorldViewport3DProps> = ({
         }
       } else {
         const heroRig = buildHeroModel(project.heroBody, project.heroColors);
+        heroRig.group.scale.setScalar(Math.max(0.25, Math.min(3.5, project.heroModelScale ?? 1)));
+        heroRig.group.position.y = project.heroModelOffsetY ?? 0;
         applyVisualStyleToObject(heroRig.group, style);
         heroAnchor.add(heroRig.group);
       }

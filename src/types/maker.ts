@@ -1826,6 +1826,11 @@ export interface GameLevel {
   weather: WeatherKind;
   vistaPreset?: VistaPresetId;
   vistaDensity?: number;
+  vistaTreeDensity?: number;
+  vistaMountainScale?: number;
+  vistaDistance?: number;
+  vistaTreeScale?: number;
+  vistaHeightFog?: number;
   vistaItems?: VistaPropItem[];
   canopyEngine?: StylizedCanopyConfig;
   sceneryTextures?: Partial<Record<SceneryTextureSlot, SurfaceTextureSettings>>;
@@ -2273,6 +2278,12 @@ export interface AtmospherePresetPayload {
   wind: number;
   visualStyle?: VisualStyleId;
   vistaPreset?: VistaPresetId;
+  vistaDensity?: number;
+  vistaTreeDensity?: number;
+  vistaMountainScale?: number;
+  vistaDistance?: number;
+  vistaTreeScale?: number;
+  vistaHeightFog?: number;
   postProcessing?: PostProcessingConfig;
 }
 
@@ -2474,15 +2485,125 @@ export type CharacterTailStyle =
 
 export type CharacterHairStyle =
   | 'none'
+  // Male / Unisex styles
+  | 'shortCrop'
+  | 'sidePart'
+  | 'pompadour'
+  | 'messySpiky'
+  | 'undercut'
+  | 'buzzFade'
+  | 'surferCurtains'
+  // Female / Long styles
+  | 'longStraight'
+  | 'bobCut'
+  | 'wavyShoulder'
+  | 'twinPigtails'
+  | 'highBun'
+  | 'braidedCrown'
+  | 'ponytail'
+  | 'curlyAfro'
+  // Creature & stylized presets
   | 'spikyTufts'
   | 'mohawk'
   | 'curlSwirl'
-  | 'ponytail'
   | 'mushroomCap'
   | 'horseMane'
   | 'lionMane'
   | 'featherTuft'
   | 'fluffyBangs';
+
+export type CharacterSurfaceCoatMode =
+  | 'none'
+  | 'furShort'
+  | 'furLong'
+  | 'furClumped'
+  | 'scalesFish'
+  | 'scalesDragon'
+  | 'scalesHex';
+
+export interface CharacterSurfaceCoatConfig {
+  mode: CharacterSurfaceCoatMode;
+  /** Bump/texture contrast and 3D tuft relief intensity (0..1) */
+  intensity: number;
+  /** Coat coverage / tuft or shingle density (0.25..1.6) */
+  density: number;
+  /** Size multiplier for scales or fur tufts (0.5..2.0) */
+  scaleSize: number;
+  /** Fur clumping / lock grouping factor (0..1) */
+  clumpiness: number;
+  /** Tip or scale-edge highlight color */
+  tipColor: string;
+}
+
+export type CharacterSpikesStyle =
+  | 'porcupineQuills'
+  | 'boneSpikes'
+  | 'dorsalFins'
+  | 'crystalSpines';
+
+export type CharacterSpikesZone =
+  | 'spine'
+  | 'headAndBack'
+  | 'shouldersAndBack'
+  | 'fullBody';
+
+export interface CharacterSpikesConfig {
+  enabled: boolean;
+  style: CharacterSpikesStyle;
+  zone: CharacterSpikesZone;
+  /** Density multiplier (0.25..1.6) */
+  density: number;
+  /** Spike/quill length in meters (0.05..0.38) */
+  length: number;
+  /** Thickness multiplier (0.5..2.0) */
+  thickness: number;
+  /** Backward sweep angle in degrees (-15..75) */
+  sweepDeg: number;
+  color: string;
+  tipColor: string;
+}
+
+export type CharacterEyewearStyle =
+  | 'none'
+  | 'roundGlasses'
+  | 'goggles'
+  | 'cyberVisor'
+  | 'monocle';
+
+export type CharacterHeadGearStyle =
+  | 'none'
+  | 'adventurerCap'
+  | 'wizardHat'
+  | 'crown'
+  | 'halo'
+  | 'flowerCrown';
+
+export type CharacterBodyGearStyle =
+  | 'none'
+  | 'backpack'
+  | 'quiver'
+  | 'cape'
+  | 'scarf'
+  | 'pauldrons';
+
+export interface CharacterAddonConfig {
+  eyewear: CharacterEyewearStyle;
+  eyewearColor: string;
+  eyewearLensColor: string;
+  eyewearOffsetY: number;
+  eyewearOffsetZ: number;
+  eyewearScale: number;
+  headGear: CharacterHeadGearStyle;
+  headGearColor: string;
+  headGearAccentColor: string;
+  headGearOffsetY: number;
+  headGearRotX: number;
+  headGearScale: number;
+  bodyGear: CharacterBodyGearStyle;
+  bodyGearColor: string;
+  bodyGearAccentColor: string;
+  bodyGearScale: number;
+}
 
 export type CharacterEyePupilStyle = 'round' | 'catSlit' | 'oval' | 'starry' | 'glow';
 
@@ -2504,6 +2625,7 @@ export type CharacterMouthStyle =
 export type CharacterMaterialFinish = 'clay' | 'toonSatin' | 'glossySlime' | 'velvetCreature';
 
 export type CharacterPresetId =
+  | 'standardHumanoid'
   | 'adventurer'
   | 'forestElf'
   | 'pocketCritter'
@@ -2596,6 +2718,21 @@ export interface CharacterMakerDoc {
   hairStyle: CharacterHairStyle;
   hairSize: number;
   hairColor: string;
+  hairAccentColor?: string;
+  hairOffsetX?: number;
+  hairOffsetY?: number;
+  hairOffsetZ?: number;
+  hairRotX?: number;
+  hairRotY?: number;
+  hairRotZ?: number;
+  hairScale?: number;
+
+  /** Surface Coat: fur (short, long, clumped) and scales (fish, dragon, hex) */
+  surfaceCoat?: CharacterSurfaceCoatConfig;
+  /** Spikes & Quills layered onto dorsal/body bones */
+  spikes?: CharacterSpikesConfig;
+  /** Fun bone-attached character accessories (eyewear, hats/crowns, packs/capes) */
+  addons?: CharacterAddonConfig;
 
   /** Beak */
   beakStyle?: CharacterBeakStyle;

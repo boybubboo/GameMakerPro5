@@ -27,6 +27,7 @@ import {
   IslandTerrain,
   levelBoardToWorld,
   MountainCave,
+  terrainHasMainMountainCave,
   TerrainPaths,
 } from '../../utils/terrain';
 import {
@@ -147,13 +148,14 @@ function describeZone(
     const startDist = Math.hypot(wx - BuddiesLandmarks.startWorld[0], wz - BuddiesLandmarks.startWorld[1]);
     const riverDist = IslandRiver.distanceTo(wx, wz);
 
-    let zone = 'Forest Main Trail';
-    if (caveDist < 12) zone = 'Mountain Cave';
-    else if (homeDist < 22) zone = 'Pine-Needle Hollow';
-    else if (dockDist < 18 || lakeDist < 26) zone = 'Whispering Lake';
-    else if (tavernDist < 22) zone = 'Woodland Tavern';
-    else if (startDist < 18) zone = 'Broken Wagon Start';
-    else if (riverDist < 9) zone = 'River Footbridge';
+    const isFreeform = Boolean(level.terrain?.freeformWorld);
+    let zone = isFreeform ? 'Explore Land' : 'Forest Main Trail';
+    if (terrainHasMainMountainCave(level.terrain) && caveDist < 12) zone = 'Mountain Cave';
+    else if (!isFreeform && homeDist < 22) zone = 'Pine-Needle Hollow';
+    else if (!isFreeform && (dockDist < 18 || lakeDist < 26)) zone = 'Whispering Lake';
+    else if (!isFreeform && tavernDist < 22) zone = 'Woodland Tavern';
+    else if (!isFreeform && startDist < 18) zone = 'Broken Wagon Start';
+    else if (!isFreeform && riverDist < 9) zone = 'River Footbridge';
 
     const buddies = level.entities.filter((e) => e.kind === 'npc' && e.isBuddy);
     const found = telemetry?.buddiesFound ?? 0;
@@ -333,130 +335,180 @@ export const TemplateMinimapSVG: React.FC<{
             strokeOpacity="0.08"
             strokeWidth="0.6"
           />
-          {/* Whispering Lake & River */}
-          {isBuddies && (
-            <ellipse
-              cx={lakeSvgX}
-              cy={lakeSvgY}
-              rx="7.5"
-              ry="5.5"
-              fill="#2B8CE6"
-              stroke="#7DD3FC"
-              strokeOpacity="0.55"
-              strokeWidth="0.8"
-            />
-          )}
-          <polyline
-            points={RIVER_POLYLINE}
-            fill="none"
-            stroke="#2B8CE6"
-            strokeWidth="3.2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-          <polyline
-            points={RIVER_POLYLINE}
-            fill="none"
-            stroke="#93C5FD"
-            strokeOpacity="0.4"
-            strokeWidth="0.9"
-          />
-
-          {/* Template-specific Paths */}
-          {isDriving ? (
+          {/* Water & Paths: render actual freeform features OR legacy template island river/trail */}
+          {level.terrain?.freeformWorld ? (
             <>
-              <polyline
-                points={DRIVING_LOOP_POLYLINE}
-                fill="none"
-                stroke="#B58E5A"
-                strokeWidth="6.4"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-              <polyline
-                points={DRIVING_LOOP_POLYLINE}
-                fill="none"
-                stroke="#1E2430"
-                strokeWidth="4.6"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-              <polyline
-                points={DRIVING_LOOP_POLYLINE}
-                fill="none"
-                stroke="#F8FAFC"
-                strokeOpacity="0.55"
-                strokeWidth="0.7"
-                strokeDasharray="2.4 2.4"
-              />
+              {(level.terrain.waterBodies ?? []).map((wb) => {
+                const [wx, wy] = w2svg(wb.center[0], wb.center[1]);
+                const rx = Math.max(1.5, (wb.radiusX / (2 * IslandTerrain.radius)) * 100);
+                const ry = Math.max(1.5, (wb.radiusZ / (2 * IslandTerrain.radius)) * 100);
+                return (
+                  <ellipse
+                    key={wb.id}
+                    cx={wx}
+                    cy={wy}
+                    rx={rx}
+                    ry={ry}
+                    fill="#2B8CE6"
+                    stroke="#93C5FD"
+                    strokeOpacity="0.45"
+                    strokeWidth="0.6"
+                  />
+                );
+              })}
+              {(level.terrain.roads ?? []).map((rd) =>
+                rd.points && rd.points.length >= 2 ? (
+                  <polyline
+                    key={rd.id}
+                    points={toPolylinePoints(rd.points)}
+                    fill="none"
+                    stroke="#C9A26B"
+                    strokeWidth={Math.max(1.2, (rd.width / (2 * IslandTerrain.radius)) * 100)}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                ) : null
+              )}
+              {(level.terrain.caves ?? []).map((c) => {
+                const [cx, cy] = w2svg(c.x, c.z);
+                return (
+                  <g key={c.id}>
+                    <circle cx={cx} cy={cy} r="2.8" fill="#334155" stroke="#94A3B8" strokeWidth="0.7" />
+                    <circle cx={cx} cy={cy} r="1.1" fill="#F59E0B" />
+                  </g>
+                );
+              })}
             </>
           ) : (
             <>
+              {/* Whispering Lake & River */}
+              {isBuddies && (
+                <ellipse
+                  cx={lakeSvgX}
+                  cy={lakeSvgY}
+                  rx="7.5"
+                  ry="5.5"
+                  fill="#2B8CE6"
+                  stroke="#7DD3FC"
+                  strokeOpacity="0.55"
+                  strokeWidth="0.8"
+                />
+              )}
               <polyline
-                points={MAIN_TRAIL_POLYLINE}
+                points={RIVER_POLYLINE}
                 fill="none"
-                stroke="#C9A26B"
-                strokeWidth="2.2"
+                stroke="#2B8CE6"
+                strokeWidth="3.2"
                 strokeLinecap="round"
                 strokeLinejoin="round"
               />
-              {isBuddies && (
+              <polyline
+                points={RIVER_POLYLINE}
+                fill="none"
+                stroke="#93C5FD"
+                strokeOpacity="0.4"
+                strokeWidth="0.9"
+              />
+
+              {/* Template-specific Paths */}
+              {isDriving ? (
                 <>
                   <polyline
-                    points={CAVE_SPUR_POLYLINE}
+                    points={DRIVING_LOOP_POLYLINE}
                     fill="none"
-                    stroke="#FDE68A"
-                    strokeOpacity="0.85"
-                    strokeWidth="1.6"
-                    strokeDasharray="2.2 1.4"
+                    stroke="#B58E5A"
+                    strokeWidth="6.4"
                     strokeLinecap="round"
+                    strokeLinejoin="round"
                   />
                   <polyline
-                    points={HOME_SPUR_POLYLINE}
+                    points={DRIVING_LOOP_POLYLINE}
                     fill="none"
-                    stroke="#FDE68A"
-                    strokeOpacity="0.85"
-                    strokeWidth="1.6"
-                    strokeDasharray="2.2 1.4"
+                    stroke="#1E2430"
+                    strokeWidth="4.6"
                     strokeLinecap="round"
+                    strokeLinejoin="round"
                   />
                   <polyline
-                    points={LAKE_SPUR_POLYLINE}
+                    points={DRIVING_LOOP_POLYLINE}
                     fill="none"
-                    stroke="#FDE68A"
-                    strokeOpacity="0.85"
-                    strokeWidth="1.6"
-                    strokeDasharray="2.2 1.4"
+                    stroke="#F8FAFC"
+                    strokeOpacity="0.55"
+                    strokeWidth="0.7"
+                    strokeDasharray="2.4 2.4"
+                  />
+                </>
+              ) : (
+                <>
+                  <polyline
+                    points={MAIN_TRAIL_POLYLINE}
+                    fill="none"
+                    stroke="#C9A26B"
+                    strokeWidth="2.2"
                     strokeLinecap="round"
+                    strokeLinejoin="round"
                   />
-                  {/* Wooden Footbridge over river */}
-                  <rect
-                    x="51"
-                    y="47"
-                    width="5.2"
-                    height="2.4"
-                    rx="0.6"
-                    transform="rotate(-24 53.6 48.2)"
-                    fill="#9A5B2F"
-                    stroke="#FDE68A"
-                    strokeWidth="0.45"
-                  />
-                  {/* Mountain Cave arch + Pine Cottage + Tavern plaza */}
-                  <g>
-                    <circle cx={caveSvgX} cy={caveSvgY} r="3.8" fill="#334155" stroke="#94A3B8" strokeWidth="0.8" />
-                    <circle cx={caveSvgX} cy={caveSvgY} r="1.4" fill="#F59E0B" />
-                  </g>
-                  <circle cx={homeSvgX} cy={homeSvgY} r="3.4" fill="#A16207" stroke="#FDE68A" strokeWidth="0.7" />
-                  <rect
-                    x={tavernSvgX - 3.6}
-                    y={tavernSvgY - 3.6}
-                    width="7.2"
-                    height="7.2"
-                    rx="1.5"
-                    fill="#D97706"
-                    stroke="#FDE68A"
-                    strokeWidth="0.8"
-                  />
+                  {isBuddies && (
+                    <>
+                      <polyline
+                        points={CAVE_SPUR_POLYLINE}
+                        fill="none"
+                        stroke="#FDE68A"
+                        strokeOpacity="0.85"
+                        strokeWidth="1.6"
+                        strokeDasharray="2.2 1.4"
+                        strokeLinecap="round"
+                      />
+                      <polyline
+                        points={HOME_SPUR_POLYLINE}
+                        fill="none"
+                        stroke="#FDE68A"
+                        strokeOpacity="0.85"
+                        strokeWidth="1.6"
+                        strokeDasharray="2.2 1.4"
+                        strokeLinecap="round"
+                      />
+                      <polyline
+                        points={LAKE_SPUR_POLYLINE}
+                        fill="none"
+                        stroke="#FDE68A"
+                        strokeOpacity="0.85"
+                        strokeWidth="1.6"
+                        strokeDasharray="2.2 1.4"
+                        strokeLinecap="round"
+                      />
+                      {/* Wooden Footbridge over river */}
+                      <rect
+                        x="51"
+                        y="47"
+                        width="5.2"
+                        height="2.4"
+                        rx="0.6"
+                        transform="rotate(-24 53.6 48.2)"
+                        fill="#9A5B2F"
+                        stroke="#FDE68A"
+                        strokeWidth="0.45"
+                      />
+                      {/* Mountain Cave arch + Pine Cottage + Tavern plaza */}
+                      {terrainHasMainMountainCave(level.terrain) && (
+                        <g>
+                          <circle cx={caveSvgX} cy={caveSvgY} r="3.8" fill="#334155" stroke="#94A3B8" strokeWidth="0.8" />
+                          <circle cx={caveSvgX} cy={caveSvgY} r="1.4" fill="#F59E0B" />
+                        </g>
+                      )}
+                      <circle cx={homeSvgX} cy={homeSvgY} r="3.4" fill="#A16207" stroke="#FDE68A" strokeWidth="0.7" />
+                      <rect
+                        x={tavernSvgX - 3.6}
+                        y={tavernSvgY - 3.6}
+                        width="7.2"
+                        height="7.2"
+                        rx="1.5"
+                        fill="#D97706"
+                        stroke="#FDE68A"
+                        strokeWidth="0.8"
+                      />
+                    </>
+                  )}
                 </>
               )}
             </>

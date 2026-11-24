@@ -1931,7 +1931,7 @@ export function buildEntityMesh(entity: LevelEntity): THREE.Group {
   }
 
   if (entity.buildingBlock) {
-    const bbScale = Math.max(0.35, Math.min(3, entity.scale));
+    const bbScale = Math.max(0.25, Math.min(3.5, entity.scale));
     let idHash = 2166136261;
     for (let i = 0; i < entity.id.length; i++) {
       idHash ^= entity.id.charCodeAt(i);
@@ -2790,7 +2790,7 @@ export function buildEntityMesh(entity: LevelEntity): THREE.Group {
   }
 
   group.rotation.y = (entity.rotation * Math.PI) / 180;
-  group.scale.setScalar(Math.max(0.35, Math.min(3, entity.scale)));
+  group.scale.setScalar(Math.max(0.25, Math.min(3.5, entity.scale)));
   return group;
 }
 

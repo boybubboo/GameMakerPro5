@@ -31,10 +31,12 @@ import { EntityItemAssignPanel } from '../shared/EntityItemAssignPanel';
 import { MakerIcon } from '../shared/IconMap';
 import { EmptyHint, FieldLabel, MakerCard } from '../shared/MakerUI';
 import { VertexPaintModal } from '../world/VertexPaintModal';
+import { CastScaleViewport3D } from './CastScaleViewport3D';
 
 export const CastStage: React.FC<{ store: MakerStore }> = ({ store }) => {
   const { currentProject, currentLevel, currentEntity, selectedSection, setSelectedSection } = store;
   const [showingAdd, setShowingAdd] = useState(false);
+  const [focusedTarget, setFocusedTarget] = useState<'hero' | 'entity'>('hero');
   const [vertexPaintEntityId, setVertexPaintEntityId] = useState<string | null>(null);
   const [chatStudioState, setChatStudioState] = useState<{
     target: ChatStudioTarget;
@@ -79,6 +81,7 @@ export const CastStage: React.FC<{ store: MakerStore }> = ({ store }) => {
                   setSelectedSection(sec.id);
                   const first = currentLevel.entities.find((e) => EntityKindMeta[e.kind].section === sec.id);
                   store.setSelectedEntityID(first?.id ?? null);
+                  setFocusedTarget(first ? 'entity' : 'hero');
                 }}
                 className={`p-2.5 rounded-2xl text-center border transition-all ${
                   active
@@ -113,7 +116,10 @@ export const CastStage: React.FC<{ store: MakerStore }> = ({ store }) => {
                 <button
                   key={ent.id}
                   type="button"
-                  onClick={() => store.setSelectedEntityID(ent.id)}
+                  onClick={() => {
+                    store.setSelectedEntityID(ent.id);
+                    setFocusedTarget('entity');
+                  }}
                   className={`w-full flex items-center gap-2.5 p-2 rounded-xl border text-left transition-colors ${
                     selected
                       ? 'bg-[#7C5CFF]/15 border-[#7C5CFF]/50'
@@ -154,11 +160,100 @@ export const CastStage: React.FC<{ store: MakerStore }> = ({ store }) => {
         </div>
       </aside>
 
-      {/* Center Content: Hero card + Grid */}
+      {/* Center Content: 3D Scale Stage + Hero card + Grid */}
       <main className="shrink-0 lg:shrink lg:flex-1 lg:h-full lg:min-h-0 lg:min-w-0 lg:overflow-y-auto maker-scroll p-4 sm:p-6 space-y-5">
+        {/* Interactive 3D Cast Scale Comparison Stage */}
+        <MakerCard className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="text-sm font-extrabold">3D Cast &amp; Conifer Scale Preview</h2>
+              <p className="text-[11px] text-slate-500 dark:text-[#949BB0]">
+                Rotate &amp; scale {focusedTarget === 'entity' && currentEntity ? currentEntity.name : currentProject.heroName} beside your world&apos;s conifer tree (this game only — saved Character Maker presets stay unchanged).
+              </p>
+            </div>
+          </div>
+
+          <CastScaleViewport3D
+            project={currentProject}
+            level={currentLevel}
+            customAssets={store.customAssets}
+            focusedTarget={focusedTarget}
+            selectedEntity={currentEntity}
+            onSelectTarget={setFocusedTarget}
+          />
+
+          {/* Quick World Scale Control linked directly to focused 3D character */}
+          {(() => {
+            const previewingEntity = focusedTarget === 'entity' && Boolean(currentEntity);
+            const ent = previewingEntity ? currentEntity : null;
+            const activeScale = ent
+              ? ent.customAssetId
+                ? ent.modelScaleAdjust ?? 1
+                : ent.scale
+              : currentProject.heroModelScale ?? 1;
+            const setActiveScale = (val: number) => {
+              if (ent) {
+                store.updateEntity(
+                  ent.id,
+                  'world scale adjust',
+                  (prev) =>
+                    prev.customAssetId
+                      ? { ...prev, modelScaleAdjust: val }
+                      : { ...prev, scale: val },
+                  false
+                );
+              } else {
+                store.updateProject(
+                  'hero world scale',
+                  (p) => ({ ...p, heroModelScale: val }),
+                  false
+                );
+              }
+            };
+            return (
+              <div className="flex flex-wrap items-center gap-3 p-2.5 rounded-xl bg-slate-100 dark:bg-[#1F2430]">
+                <div className="min-w-[140px]">
+                  <div className="text-[11px] font-extrabold">
+                    World Scale ({ent ? ent.name : currentProject.heroName})
+                  </div>
+                  <div className="text-[10px] text-slate-500 dark:text-[#949BB0]">
+                    Game-only size vs conifer tree
+                  </div>
+                </div>
+                <input
+                  type="range"
+                  min={0.25}
+                  max={3.5}
+                  step={0.05}
+                  value={activeScale}
+                  onChange={(e) => setActiveScale(Number(e.target.value))}
+                  className="flex-1 min-w-[140px] accent-[#7C5CFF]"
+                />
+                <span className="text-xs font-extrabold tabular-nums w-12 text-right">
+                  {activeScale.toFixed(2)}×
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setActiveScale(1)}
+                  className="px-2.5 py-1 rounded-lg bg-white dark:bg-[#171A23] border border-slate-200/80 dark:border-white/[0.08] text-[11px] font-bold hover:border-[#7C5CFF]"
+                >
+                  Reset 1×
+                </button>
+              </div>
+            );
+          })()}
+        </MakerCard>
+
         {/* Hero Card */}
-        <MakerCard className="space-y-4">
-          <div className="flex flex-wrap items-center gap-4">
+        <MakerCard
+          className={`space-y-4 ${
+            focusedTarget === 'hero' ? 'ring-2 ring-[#7C5CFF]/35 border-[#7C5CFF]/60' : ''
+          }`}
+        >
+          <div
+            className="flex flex-wrap items-center gap-4 cursor-pointer"
+            onClick={() => setFocusedTarget('hero')}
+          >
             <AssetThumbnail
               customAsset={heroCustomAsset}
               hero={{
@@ -304,29 +399,43 @@ export const CastStage: React.FC<{ store: MakerStore }> = ({ store }) => {
               </div>
             </div>
 
-            {heroCustomAsset && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-xl bg-slate-100 dark:bg-[#1F2430]">
-                <div className="space-y-1">
-                  <div className="flex justify-between text-[11px] font-semibold">
-                    <span>Scale Adjust</span>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-xl bg-slate-100 dark:bg-[#1F2430]">
+              <div className="space-y-1">
+                <div className="flex items-center justify-between text-[11px] font-semibold">
+                  <span>World Scale (This Game)</span>
+                  <div className="flex items-center gap-2">
                     <span className="tabular-nums">{(currentProject.heroModelScale ?? 1).toFixed(2)}×</span>
+                    {(currentProject.heroModelScale ?? 1) !== 1 && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          store.updateProject('reset hero scale', (p) => ({ ...p, heroModelScale: 1 }))
+                        }
+                        className="text-[10px] font-bold text-[#7C5CFF] hover:underline"
+                      >
+                        Reset
+                      </button>
+                    )}
                   </div>
-                  <input
-                    type="range"
-                    min={0.3}
-                    max={2.5}
-                    step={0.05}
-                    value={currentProject.heroModelScale ?? 1}
-                    onChange={(e) =>
-                      store.updateProject(
-                        'hero model scale',
-                        (p) => ({ ...p, heroModelScale: Number(e.target.value) }),
-                        false
-                      )
-                    }
-                    className="w-full accent-[#7C5CFF]"
-                  />
                 </div>
+                <input
+                  type="range"
+                  min={0.25}
+                  max={3.5}
+                  step={0.05}
+                  value={currentProject.heroModelScale ?? 1}
+                  onChange={(e) => {
+                    setFocusedTarget('hero');
+                    store.updateProject(
+                      'hero model scale',
+                      (p) => ({ ...p, heroModelScale: Number(e.target.value) }),
+                      false
+                    );
+                  }}
+                  className="w-full accent-[#7C5CFF]"
+                />
+              </div>
+              {heroCustomAsset ? (
                 <div className="space-y-1">
                   <div className="flex justify-between text-[11px] font-semibold">
                     <span>Animation Speed</span>
@@ -348,8 +457,12 @@ export const CastStage: React.FC<{ store: MakerStore }> = ({ store }) => {
                     className="w-full accent-[#7C5CFF]"
                   />
                 </div>
-              </div>
-            )}
+              ) : (
+                <div className="flex items-center text-[11px] text-slate-500 dark:text-[#949BB0]">
+                  Sizes your hero relative to trees &amp; props in this project without altering saved character recipes.
+                </div>
+              )}
+            </div>
           </div>
         </MakerCard>
 
@@ -396,7 +509,10 @@ export const CastStage: React.FC<{ store: MakerStore }> = ({ store }) => {
                   <button
                     key={ent.id}
                     type="button"
-                    onClick={() => store.setSelectedEntityID(ent.id)}
+                    onClick={() => {
+                      store.setSelectedEntityID(ent.id);
+                      setFocusedTarget('entity');
+                    }}
                     className={`p-3.5 rounded-2xl bg-white dark:bg-[#171A23] border text-left transition-all ${
                       selected
                         ? 'border-[#7C5CFF] ring-2 ring-[#7C5CFF]/25'
@@ -451,6 +567,7 @@ export const CastStage: React.FC<{ store: MakerStore }> = ({ store }) => {
           onAdd={(kind, name) => {
             const added = store.addEntity(kind, name);
             setSelectedSection(EntityKindMeta[added.kind].section);
+            setFocusedTarget('entity');
           }}
         />
       )}
@@ -552,33 +669,56 @@ const EntityInspector: React.FC<{
           ))}
         </select>
 
-        {boundAsset && (
-          <div className="space-y-2 pt-1">
+        {/* Non-permanent World Scale Adjuster (for both Custom GLB & Built-in Cast) */}
+        <div className="space-y-2 pt-1">
+          {boundAsset && (
             <div className="text-[11px] text-slate-500 dark:text-[#949BB0]">
               {boundAsset.hasSkeleton ? 'Rigged' : 'Static mesh'} · {boundAsset.animationClips.length} clips
             </div>
-            <div className="space-y-1">
-              <div className="flex justify-between text-[11px] font-semibold">
-                <span>Scale Adjust</span>
-                <span>{(entity.modelScaleAdjust ?? 1).toFixed(2)}×</span>
+          )}
+          <div className="space-y-1">
+            <div className="flex items-center justify-between text-[11px] font-semibold">
+              <span>World Scale (This Game)</span>
+              <div className="flex items-center gap-2">
+                <span className="tabular-nums">
+                  {(boundAsset ? entity.modelScaleAdjust ?? 1 : entity.scale).toFixed(2)}×
+                </span>
+                {(boundAsset ? entity.modelScaleAdjust ?? 1 : entity.scale) !== 1 && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      store.updateEntity(
+                        entity.id,
+                        'reset entity world scale',
+                        (ent) => (boundAsset ? { ...ent, modelScaleAdjust: 1 } : { ...ent, scale: 1 })
+                      )
+                    }
+                    className="text-[10px] font-bold text-[#7C5CFF] hover:underline"
+                  >
+                    Reset
+                  </button>
+                )}
               </div>
-              <input
-                type="range"
-                min={0.3}
-                max={2.6}
-                step={0.05}
-                value={entity.modelScaleAdjust ?? 1}
-                onChange={(e) =>
-                  store.updateEntity(
-                    entity.id,
-                    'model scale',
-                    (ent) => ({ ...ent, modelScaleAdjust: Number(e.target.value) }),
-                    false
-                  )
-                }
-                className="w-full accent-[#7C5CFF]"
-              />
             </div>
+            <input
+              type="range"
+              min={0.25}
+              max={3.5}
+              step={0.05}
+              value={boundAsset ? entity.modelScaleAdjust ?? 1 : entity.scale}
+              onChange={(e) => {
+                const val = Number(e.target.value);
+                store.updateEntity(
+                  entity.id,
+                  'model scale',
+                  (ent) => (boundAsset ? { ...ent, modelScaleAdjust: val } : { ...ent, scale: val }),
+                  false
+                );
+              }}
+              className="w-full accent-[#7C5CFF]"
+            />
+          </div>
+          {boundAsset && (
             <div className="space-y-1">
               <div className="flex justify-between text-[11px] font-semibold">
                 <span>Ground Height (Y)</span>
@@ -601,8 +741,8 @@ const EntityInspector: React.FC<{
                 className="w-full accent-[#7C5CFF]"
               />
             </div>
-          </div>
-        )}
+          )}
+        </div>
 
         {(boundAsset?.category === 'character' ||
           entity.kind === 'npc' ||

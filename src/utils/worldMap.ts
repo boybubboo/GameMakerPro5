@@ -13,6 +13,7 @@ import {
   getTerrainRadius,
   uid,
 } from './terrain';
+import { buildCanopyConfigFromUserDefaults } from './defaultTreeStyles';
 
 export const WORLD_TERRAIN_YELLOW = '#E5C67E';
 export const WORLD_BORDER_GRAY = '#6E7582';
@@ -883,7 +884,9 @@ export function createLandLevelFromTemplate(
     weather: 'none',
     vistaPreset: 'coastalArchipelago',
     vistaDensity: 0.7,
-    canopyEngine: baseLevel?.canopyEngine ? JSON.parse(JSON.stringify(baseLevel.canopyEngine)) : undefined,
+    canopyEngine: baseLevel?.canopyEngine?.enabled
+      ? buildCanopyConfigFromUserDefaults(JSON.parse(JSON.stringify(baseLevel.canopyEngine)))
+      : buildCanopyConfigFromUserDefaults(baseLevel?.canopyEngine),
     wind: baseLevel?.wind ?? 0.45,
     canSwim: true,
     notes: '',
