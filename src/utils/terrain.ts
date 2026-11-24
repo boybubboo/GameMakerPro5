@@ -476,12 +476,23 @@ export function getEnvironmentType(level?: Partial<GameLevel> | null): Environme
   return 'openWorld';
 }
 
+export function getTerrainRadius(terrain?: Pick<TerrainData, 'worldRadius'> | null): number {
+  return terrain?.worldRadius && terrain.worldRadius > 0
+    ? terrain.worldRadius
+    : IslandTerrain.radius;
+}
+
+export function getTerrainShoreRadius(terrain?: Pick<TerrainData, 'worldRadius'> | null): number {
+  const r = getTerrainRadius(terrain);
+  return r === IslandTerrain.radius ? IslandTerrain.shoreRadius : r * 1.05;
+}
+
 export function getLevelWorldRadius(level?: Partial<GameLevel> | null): number {
   const env = getEnvironmentType(level);
   if (env === 'dungeon') return 42;
   if (env === 'castle') return 46;
   if (env === 'sideScroller') return 56;
-  return IslandTerrain.radius;
+  return getTerrainRadius(level?.terrain);
 }
 
 export function levelBoardToWorld(level: Partial<GameLevel> | null | undefined, point: BoardPoint): [number, number] {
@@ -504,7 +515,8 @@ export function levelBoardToWorld(level: Partial<GameLevel> | null | undefined, 
       (point.y - 0.5) * 84,
     ];
   }
-  return IslandTerrain.boardToWorld(point);
+  const r = getTerrainRadius(level?.terrain);
+  return [(point.x - 0.5) * 2 * r, (point.y - 0.5) * 2 * r];
 }
 
 export function levelWorldToBoard(level: Partial<GameLevel> | null | undefined, x: number, z: number): BoardPoint {
@@ -527,7 +539,11 @@ export function levelWorldToBoard(level: Partial<GameLevel> | null | undefined, 
       y: Math.min(0.95, Math.max(0.05, z / 84 + 0.5)),
     };
   }
-  return IslandTerrain.worldToBoard(x, z);
+  const r = getTerrainRadius(level?.terrain);
+  return {
+    x: Math.min(0.95, Math.max(0.05, x / (2 * r) + 0.5)),
+    y: Math.min(0.95, Math.max(0.05, z / (2 * r) + 0.5)),
+  };
 }
 
 export const SIDE_SCROLLER_SEGMENTS: SidePlatformSegment[] = [
@@ -1865,11 +1881,10 @@ export function ensureUpgradedTerrain(terrain: TerrainData | undefined): Terrain
 
 export function sampleTerrainHeight(terrain: TerrainData | undefined, x: number, z: number): number {
   const dist = Math.hypot(x, z);
-  if (!terrain?.freeformWorld && dist > IslandTerrain.shoreRadius) return IslandTerrain.seaFloor;
-  if (
-    terrain?.freeformWorld &&
-    (Math.abs(x) > IslandTerrain.radius || Math.abs(z) > IslandTerrain.radius)
-  ) {
+  const r = getTerrainRadius(terrain);
+  const sr = getTerrainShoreRadius(terrain);
+  if (!terrain?.freeformWorld && dist > sr) return IslandTerrain.seaFloor;
+  if (terrain?.freeformWorld && (Math.abs(x) > r || Math.abs(z) > r)) {
     return IslandTerrain.seaFloor;
   }
   if (
@@ -1881,7 +1896,6 @@ export function sampleTerrainHeight(terrain: TerrainData | undefined, x: number,
   }
   const size = terrain.size;
   const width = size + 1;
-  const r = IslandTerrain.radius;
   const fx = Math.max(0, Math.min(size - 0.0001, ((x + r) / (2 * r)) * size));
   const fz = Math.max(0, Math.min(size - 0.0001, ((z + r) / (2 * r)) * size));
   const c1 = Math.floor(fx);
@@ -2007,7 +2021,7 @@ export function sampleTerrainWeathering(
   }
   const size = terrain.size;
   const width = size + 1;
-  const r = IslandTerrain.radius;
+  const r = getTerrainRadius(terrain);
   const fx = Math.max(0, Math.min(size - 0.0001, ((x + r) / (2 * r)) * size));
   const fz = Math.max(0, Math.min(size - 0.0001, ((z + r) / (2 * r)) * size));
   const c0 = Math.floor(fx);
@@ -2047,7 +2061,7 @@ export function applyTerrainBrush(
   const terrain = ensureUpgradedTerrain(rawTerrain);
   const size = terrain.size;
   const width = size + 1;
-  const worldRadius = IslandTerrain.radius;
+  const worldRadius = getTerrainRadius(terrain);
   const step = (2 * worldRadius) / size;
   const strength = Math.max(0.1, Math.min(1.5, options?.strength ?? 0.65));
   const falloffMode: TerrainBrushFalloff = options?.falloff ?? 'smooth';
@@ -2395,8 +2409,8 @@ export function applyTerrainBrush(
     const sz = z + Math.sin(angle) * dist;
     if (
       terrain.freeformWorld
-        ? Math.abs(sx) >= IslandTerrain.radius * 0.96 || Math.abs(sz) >= IslandTerrain.radius * 0.96
-        : Math.hypot(sx, sz) >= IslandTerrain.radius * 0.94
+        ? Math.abs(sx) >= worldRadius * 0.96 || Math.abs(sz) >= worldRadius * 0.96
+        : Math.hypot(sx, sz) >= worldRadius * 0.94
     ) {
       continue;
     }
@@ -2435,7 +2449,7 @@ export function applySlopeAutoWeathering(
   const terrain = ensureUpgradedTerrain(rawTerrain);
   const size = terrain.size;
   const width = size + 1;
-  const worldRadius = IslandTerrain.radius;
+  const worldRadius = getTerrainRadius(terrain);
   const step = (2 * worldRadius) / size;
   const cellCount = width * width;
   const existing =
@@ -2967,7 +2981,7 @@ export function carveWaterBodyIntoTerrain(
   const terrain = ensureUpgradedTerrain(rawTerrain);
   const size = terrain.size;
   const width = size + 1;
-  const worldRadius = IslandTerrain.radius;
+  const worldRadius = getTerrainRadius(terrain);
   const step = (2 * worldRadius) / size;
   const heights = [...terrain.heights];
   const layers = [...terrain.layers];
@@ -3058,7 +3072,7 @@ export function applyRoadSplineToTerrain(
   const samples = samplePolylineSpline(road.points, Math.max(48, road.points.length * 16));
   const size = terrain.size;
   const width = size + 1;
-  const worldRadius = IslandTerrain.radius;
+  const worldRadius = getTerrainRadius(terrain);
   const step = (2 * worldRadius) / size;
   const heights = [...terrain.heights];
   const layers = [...terrain.layers];
@@ -3104,7 +3118,13 @@ export function applyRoadSplineToTerrain(
         const offset = innerHalf + 0.65 + Math.random() * (0.8 + rand * 1.4);
         const sx = s.x + nx * side * offset + (Math.random() - 0.5) * rand * 0.8;
         const sz = s.z + nz * side * offset + (Math.random() - 0.5) * rand * 0.8;
-        if (Math.hypot(sx, sz) > IslandTerrain.radius * 0.93) continue;
+        if (
+          terrain.freeformWorld
+            ? Math.abs(sx) > worldRadius * 0.95 || Math.abs(sz) > worldRadius * 0.95
+            : Math.hypot(sx, sz) > worldRadius * 0.93
+        ) {
+          continue;
+        }
         let kind: ScatterItem['kind'] = 'flower';
         if (road.borderScatter === 'grass') kind = 'tallGrass';
         else if (road.borderScatter === 'boulders') kind = 'rock';
@@ -3163,7 +3183,7 @@ export function apply2DOverviewBrushStroke(
   const terrain = ensureUpgradedTerrain(rawTerrain);
   const size = terrain.size;
   const width = size + 1;
-  const worldRadius = IslandTerrain.radius;
+  const worldRadius = getTerrainRadius(terrain);
   const step = (2 * worldRadius) / size;
   const r = Math.max(2, radius);
   const minCol = Math.max(1, Math.floor(((x - r + worldRadius) / (2 * worldRadius)) * size) - 1);
@@ -3377,8 +3397,8 @@ export function apply2DOverviewBrushStroke(
     const sz = z + Math.sin(ang) * dist;
     if (
       terrain.freeformWorld
-        ? Math.abs(sx) >= IslandTerrain.radius * 0.96 || Math.abs(sz) >= IslandTerrain.radius * 0.96
-        : Math.hypot(sx, sz) >= IslandTerrain.radius * 0.94
+        ? Math.abs(sx) >= worldRadius * 0.96 || Math.abs(sz) >= worldRadius * 0.96
+        : Math.hypot(sx, sz) >= worldRadius * 0.94
     ) {
       continue;
     }

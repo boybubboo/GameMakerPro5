@@ -94,13 +94,18 @@ import {
   WORLD_MAP_RADIUS,
   applyWorldMapStroke,
   clampRegionOrigin,
+  compactWorldMapForStorage,
+  computeRegionBounds,
   computeRegionCentroids,
+  computeRegionWindowRadius,
   createEmptyWorldMap,
   createLandLevelFromTemplate,
   createScratchOceanTerrain,
   ensureWorldMapForProject,
   findNextRegionCode,
   getWorldMapRadius,
+  hasManualTerrainEdits,
+  hydrateWorldMapFromStorage,
   landLocalToWorldMap,
   pickNextRegionColor,
   syncLevelTerrainWithWorldMap,
@@ -188,6 +193,7 @@ import {
   createInitialTerrain,
   ensureUpgradedTerrain,
   getEnvironmentType,
+  getTerrainRadius,
   IslandTerrain,
   levelWorldToBoard,
   normalizeCaveGrotto,
@@ -290,12 +296,13 @@ function migrateProject(proj: GameProject): GameProject {
         ],
       };
 
+  const hydratedWorldMap = hydrateWorldMapFromStorage(proj.worldMap);
   const upgradedWorldMap =
-    proj.worldMap &&
-    (proj.worldMap.worldRadius !== WORLD_MAP_RADIUS ||
-      proj.worldMap.gridSize !== WORLD_MAP_GRID_SIZE)
-      ? ensureWorldMapForProject({ ...proj, levels })
-      : proj.worldMap;
+    hydratedWorldMap &&
+    (hydratedWorldMap.worldRadius !== WORLD_MAP_RADIUS ||
+      hydratedWorldMap.gridSize !== WORLD_MAP_GRID_SIZE)
+      ? ensureWorldMapForProject({ ...proj, levels, worldMap: hydratedWorldMap })
+      : hydratedWorldMap;
 
   return {
     ...proj,
@@ -608,8 +615,11 @@ export function useMakerStore() {
           const proj = list[i];
           let json = cache.get(proj);
           if (json === undefined) {
-            const { levels, ...rest } = proj;
-            const baseJson = JSON.stringify(rest);
+            const { levels, worldMap: rawWm, ...rest } = proj;
+            const persistHead = rawWm
+              ? { ...rest, worldMap: compactWorldMapForStorage(rawWm) }
+              : rest;
+            const baseJson = JSON.stringify(persistHead);
             const levelParts = new Array<string>(levels.length);
             for (let li = 0; li < levels.length; li++) {
               const lvl = levels[li];
@@ -1460,13 +1470,28 @@ export function useMakerStore() {
         firstOpenLvl!.entities.length === 0 &&
         (firstOpenLvl!.terrain?.scatter.length ?? 0) === 0;
 
-      const targetLevel = canReuseFirst
-        ? {
-            ...firstOpenLvl!,
-            name,
-            terrain: syncLevelTerrainWithWorldMap(firstOpenLvl!.terrain, baseWm, nextCode),
-          }
-        : createLandLevelFromTemplate(currentLevel ?? currentProject.levels[0], name, baseWm, nextCode);
+      let targetLevel: GameLevel;
+      if (canReuseFirst && firstOpenLvl) {
+        const scratchBase = createScratchOceanTerrain();
+        const cleanBaseTerrain = {
+          ...scratchBase,
+          mountainConfig: firstOpenLvl.terrain?.mountainConfig ?? scratchBase.mountainConfig,
+          dirtAndRoadConfig:
+            firstOpenLvl.terrain?.dirtAndRoadConfig ?? scratchBase.dirtAndRoadConfig,
+        };
+        targetLevel = {
+          ...firstOpenLvl,
+          name,
+          terrain: syncLevelTerrainWithWorldMap(cleanBaseTerrain, baseWm, nextCode),
+        };
+      } else {
+        targetLevel = createLandLevelFromTemplate(
+          currentLevel ?? currentProject.levels[0],
+          name,
+          baseWm,
+          nextCode
+        );
+      }
 
       const newRegion: WorldLandRegion = {
         id: uid(),
@@ -1596,40 +1621,95 @@ export function useMakerStore() {
           `enter ${targetLevel.name}`,
           (proj) => {
             const baseWm = proj.worldMap ?? ensureWorldMapForProject(proj);
+            const currentRegion = baseWm.regions.find((r) => r.levelId === targetLevel.id);
             let nextWm = baseWm;
-            let resolvedOrigin = region?.origin;
-            if (region && !resolvedOrigin) {
-              const centroid = computeRegionCentroids(baseWm).get(region.code);
-              if (centroid && centroid.cellCount > 0) {
-                resolvedOrigin = clampRegionOrigin(
-                  centroid.x,
-                  centroid.z,
+            let resolvedOrigin = currentRegion?.origin;
+            let originMoved = false;
+
+            if (currentRegion) {
+              const bounds = computeRegionBounds(baseWm, currentRegion.code);
+              if (bounds && bounds.cellCount > 0) {
+                const centeredOrigin = clampRegionOrigin(
+                  bounds.centerX,
+                  bounds.centerZ,
                   getWorldMapRadius(baseWm)
                 );
-                nextWm = {
-                  ...baseWm,
-                  regions: baseWm.regions.map((r) =>
-                    r.id === region.id ? { ...r, origin: resolvedOrigin } : r
-                  ),
-                };
+                const ox = currentRegion.origin?.[0] ?? 0;
+                const oz = currentRegion.origin?.[1] ?? 0;
+                const currentLevelObj = proj.levels.find((l) => l.id === targetLevel.id);
+                const currentRadius = getTerrainRadius(currentLevelObj?.terrain);
+                const margin = currentRadius - 2;
+                const fitsCurrentOrigin =
+                  Boolean(currentRegion.origin) &&
+                  bounds.minX >= ox - margin &&
+                  bounds.maxX <= ox + margin &&
+                  bounds.minZ >= oz - margin &&
+                  bounds.maxZ <= oz + margin;
+                const shiftDist = currentRegion.origin
+                  ? Math.hypot(ox - centeredOrigin[0], oz - centeredOrigin[1])
+                  : Infinity;
+                const hasPlacedWork =
+                  Boolean(currentLevelObj) &&
+                  (currentLevelObj!.entities.length > 0 ||
+                    hasManualTerrainEdits(currentLevelObj!.terrain));
+
+                if (
+                  !currentRegion.origin ||
+                  !fitsCurrentOrigin ||
+                  (!hasPlacedWork && shiftDist > 8)
+                ) {
+                  originMoved =
+                    !currentRegion.origin ||
+                    ox !== centeredOrigin[0] ||
+                    oz !== centeredOrigin[1];
+                  resolvedOrigin = centeredOrigin;
+                  nextWm = {
+                    ...baseWm,
+                    regions: baseWm.regions.map((r) =>
+                      r.id === currentRegion.id ? { ...r, origin: resolvedOrigin } : r
+                    ),
+                    revision: baseWm.revision + 1,
+                  };
+                }
               }
             }
+
             return {
               ...proj,
               worldMap: nextWm,
-              levels: proj.levels.map((l) =>
-                l.id === targetLevel.id
-                  ? {
-                      ...l,
-                      terrain: syncLevelTerrainWithWorldMap(
-                        l.terrain,
-                        nextWm,
-                        region?.code,
-                        resolvedOrigin
-                      ),
-                    }
-                  : l
-              ),
+              levels: proj.levels.map((l) => {
+                if (l.id !== targetLevel.id) return l;
+                const oldRadius = getTerrainRadius(l.terrain);
+                const newRadius = computeRegionWindowRadius(
+                  nextWm,
+                  currentRegion?.code,
+                  resolvedOrigin
+                );
+                const shouldResetBase =
+                  !hasManualTerrainEdits(l.terrain) &&
+                  (originMoved ||
+                    Math.abs(oldRadius - newRadius) > 0.5 ||
+                    l.terrain?.worldRadius === undefined);
+                let baseTerrain = l.terrain;
+                if (shouldResetBase || originMoved) {
+                  const freshScratch = createScratchOceanTerrain();
+                  baseTerrain = {
+                    ...freshScratch,
+                    mountainConfig: l.terrain?.mountainConfig ?? freshScratch.mountainConfig,
+                    dirtAndRoadConfig:
+                      l.terrain?.dirtAndRoadConfig ?? freshScratch.dirtAndRoadConfig,
+                  };
+                }
+                return {
+                  ...l,
+                  terrain: syncLevelTerrainWithWorldMap(
+                    baseTerrain,
+                    nextWm,
+                    currentRegion?.code,
+                    resolvedOrigin
+                  ),
+                };
+              }),
             };
           },
           false

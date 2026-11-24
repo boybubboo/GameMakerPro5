@@ -28,6 +28,7 @@ import {
   IslandTerrain,
   createInitialTerrain,
   getEnvironmentType,
+  getTerrainRadius,
   levelBoardToWorld,
   levelWorldToBoard,
   PlatformMotion,
@@ -487,11 +488,7 @@ export const WorldViewport3D: React.FC<WorldViewport3DProps> = ({
     const saveCurrentCameraPose = () => {
       const refs = sceneRefs.current;
       if (!refs || !refs.lastFramedEnvKey) return;
-      const { project: curProj, level: curLvl, worldEditorScope: curScope } = propsRef.current;
-      const curEnv = getEnvironmentType(curLvl);
-      const scopeKey = curScope === 'worldMap' && curEnv === 'openWorld' ? 'worldMap' : curLvl.id;
-      const poseKey = `${curProj.id}:${scopeKey}:${curEnv}`;
-      savedCameraPoseMap.set(poseKey, {
+      savedCameraPoseMap.set(refs.lastFramedEnvKey, {
         pos: [camera.position.x, camera.position.y, camera.position.z],
         target: [controls.target.x, controls.target.y, controls.target.z],
       });
@@ -732,6 +729,9 @@ export const WorldViewport3D: React.FC<WorldViewport3DProps> = ({
 
     const raycaster = new THREE.Raycaster();
     const pointerNdc = new THREE.Vector2();
+    const _waterPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -IslandTerrain.waterLevel);
+    const _planeHit = new THREE.Vector3();
+    const _worldNormal = new THREE.Vector3();
 
     let activeMode: 'none' | 'dragEntity' | 'rotateEntity' | 'scaleEntity' | 'brush' = 'none';
     let activeEntityId: string | null = null;
@@ -764,14 +764,15 @@ export const WorldViewport3D: React.FC<WorldViewport3DProps> = ({
         return meshHit;
       }
       if (allowOceanPlane) {
-        const waterPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -IslandTerrain.waterLevel);
-        const planeHit = new THREE.Vector3();
-        if (raycaster.ray.intersectPlane(waterPlane, planeHit)) {
-          const rMax = isWm ? getWorldMapRadius(curState.worldMap) : IslandTerrain.radius;
-          if (Math.abs(planeHit.x) <= rMax + 2 && Math.abs(planeHit.z) <= rMax + 2) {
-            planeHit.x = Math.max(-rMax, Math.min(rMax, planeHit.x));
-            planeHit.z = Math.max(-rMax, Math.min(rMax, planeHit.z));
-            return planeHit;
+        _waterPlane.constant = -IslandTerrain.waterLevel;
+        if (raycaster.ray.intersectPlane(_waterPlane, _planeHit)) {
+          const rMax = isWm
+            ? getWorldMapRadius(curState.worldMap)
+            : getTerrainRadius(curState.level.terrain);
+          if (Math.abs(_planeHit.x) <= rMax + 2 && Math.abs(_planeHit.z) <= rMax + 2) {
+            _planeHit.x = Math.max(-rMax, Math.min(rMax, _planeHit.x));
+            _planeHit.z = Math.max(-rMax, Math.min(rMax, _planeHit.z));
+            return _planeHit;
           }
         }
       }
@@ -853,7 +854,7 @@ export const WorldViewport3D: React.FC<WorldViewport3DProps> = ({
         }
         if (stackTargets.length > 0) {
           const objHits = raycaster.intersectObjects(stackTargets, true);
-          const worldNormal = new THREE.Vector3();
+          const worldNormal = _worldNormal;
           for (const h of objHits) {
             if (!h.face) continue;
             worldNormal.copy(h.face.normal).transformDirection(h.object.matrixWorld).normalize();
@@ -1541,11 +1542,14 @@ export const WorldViewport3D: React.FC<WorldViewport3DProps> = ({
           fx.update(dt, refs.camera);
         });
 
-        // Animate moving platforms cleanly without traversing entities every frame
+        // Animate moving platforms cleanly without scanning unrelated entities every frame
         if (refs.hasDynamicShadows || refs.customUpdaters.length > 0) {
-          refs.entityGroups.forEach((grp, id) => {
-            const ent = curLevel.entities.find((item) => item.id === id);
-            if (ent && ent.kind === 'platform' && ent.platformRunning) {
+          if (refs.hasDynamicShadows) {
+            for (let ei = 0; ei < curLevel.entities.length; ei++) {
+              const ent = curLevel.entities[ei];
+              if (ent.kind !== 'platform' || !ent.platformRunning) continue;
+              const grp = refs.entityGroups.get(ent.id);
+              if (!grp) continue;
               const [sx, sz] = levelBoardToWorld(curLevel, ent.position);
               const sy = sampleLevelHeight(curLevel, sx, sz) + PlatformMotion.hover(ent.platformPreset);
               const endBp = ent.platformEnd ?? ent.position;
@@ -1564,7 +1568,7 @@ export const WorldViewport3D: React.FC<WorldViewport3DProps> = ({
                 grp.rotation.y = pose.yaw;
               }
             }
-          });
+          }
           if (t - lastAnimShadowTime >= 0.08) {
             lastAnimShadowTime = t;
             refs.markShadowDirty();
@@ -2110,8 +2114,17 @@ export const WorldViewport3D: React.FC<WorldViewport3DProps> = ({
 
     const env = getEnvironmentType(level);
     const isWorldMapScope = worldEditorScope === 'worldMap' && env === 'openWorld';
-    refs.controls.maxDistance = isWorldMapScope ? 1600 : 360;
-    const frameKey = `${project.id}:${isWorldMapScope ? 'worldMap' : level.id}:${env}`;
+    const landRadius = getTerrainRadius(level.terrain);
+    refs.controls.maxDistance = isWorldMapScope
+      ? 1600
+      : Math.max(360, landRadius * 2.5);
+    const activeRegionForFrame = worldMap?.regions.find((r) => r.code === activeWorldRegionCode);
+    const originKey = activeRegionForFrame?.origin
+      ? `${Math.round(activeRegionForFrame.origin[0])}:${Math.round(activeRegionForFrame.origin[1])}`
+      : '0:0';
+    const frameKey = `${project.id}:${
+      isWorldMapScope ? 'worldMap' : `${level.id}:${originKey}:${Math.round(landRadius)}`
+    }:${env}`;
     if (refs.lastFramedEnvKey !== frameKey) {
       refs.lastFramedEnvKey = frameKey;
       const savedPose = savedCameraPoseMap.get(frameKey);
@@ -2128,8 +2141,71 @@ export const WorldViewport3D: React.FC<WorldViewport3DProps> = ({
         refs.camera.position.set(0, 32, 46);
         refs.controls.target.set(0, 1.2, 0);
       } else {
-        refs.camera.position.set(68, 52, 88);
-        refs.controls.target.set(0, 1.2, 0);
+        let minX = Infinity;
+        let maxX = -Infinity;
+        let minZ = Infinity;
+        let maxZ = -Infinity;
+
+        if (worldMap && activeWorldRegionCode && activeWorldRegionCode > 0) {
+          const ox = activeRegionForFrame?.origin?.[0] ?? 0;
+          const oz = activeRegionForFrame?.origin?.[1] ?? 0;
+          const wmSize = worldMap.gridSize;
+          const wmWidth = wmSize + 1;
+          const wmRadius =
+            typeof worldMap.worldRadius === 'number' && worldMap.worldRadius > 0
+              ? worldMap.worldRadius
+              : 640;
+          const wmStep = (2 * wmRadius) / wmSize;
+          for (let row = 0; row <= wmSize; row++) {
+            const wz = -wmRadius + row * wmStep;
+            const lx = Math.abs(wz - oz);
+            if (lx > landRadius) continue;
+            const rowOff = row * wmWidth;
+            for (let col = 0; col <= wmSize; col++) {
+              const idx = rowOff + col;
+              if (worldMap.landMask[idx] !== 1) continue;
+              if ((worldMap.regionGrid[idx] ?? 0) !== activeWorldRegionCode) continue;
+              const localX = -wmRadius + col * wmStep - ox;
+              const localZ = wz - oz;
+              if (Math.abs(localX) > landRadius) continue;
+              if (localX < minX) minX = localX;
+              if (localX > maxX) maxX = localX;
+              if (localZ < minZ) minZ = localZ;
+              if (localZ > maxZ) maxZ = localZ;
+            }
+          }
+        }
+
+        if ((!Number.isFinite(minX) || maxX <= minX || maxZ <= minZ) && level.terrain) {
+          const tSize = level.terrain.size;
+          const tWidth = tSize + 1;
+          const tStep = (2 * landRadius) / tSize;
+          const seaCutoff = IslandTerrain.waterLevel - 0.15;
+          for (let row = 0; row <= tSize; row++) {
+            const vz = -landRadius + row * tStep;
+            const rowOff = row * tWidth;
+            for (let col = 0; col <= tSize; col++) {
+              if (level.terrain.heights[rowOff + col] <= seaCutoff) continue;
+              const vx = -landRadius + col * tStep;
+              if (vx < minX) minX = vx;
+              if (vx > maxX) maxX = vx;
+              if (vz < minZ) minZ = vz;
+              if (vz > maxZ) maxZ = vz;
+            }
+          }
+        }
+
+        if (Number.isFinite(minX) && maxX > minX && maxZ > minZ) {
+          const cx = (minX + maxX) * 0.5;
+          const cz = (minZ + maxZ) * 0.5;
+          const halfExtent = Math.max(24, (maxX - minX) * 0.5, (maxZ - minZ) * 0.5);
+          const dist = Math.max(44, Math.min(920, halfExtent * 1.9));
+          refs.controls.target.set(cx, 1.2, cz);
+          refs.camera.position.set(cx + dist * 0.52, dist * 0.55, cz + dist * 0.72);
+        } else {
+          refs.camera.position.set(68, 52, 88);
+          refs.controls.target.set(0, 1.2, 0);
+        }
       }
       refs.controls.update();
     }

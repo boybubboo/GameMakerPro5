@@ -49,7 +49,7 @@ import {
   createDriftingCloudShadowNode,
   getSharedBotwUniforms,
 } from './botwStyleUtils';
-import { ensureUpgradedTerrain, IslandTerrain, sampleTerrainHeight } from '../utils/terrain';
+import { ensureUpgradedTerrain, getTerrainRadius, IslandTerrain, sampleTerrainHeight } from '../utils/terrain';
 import { sampleWorldMapAtWorld } from '../utils/worldMap';
 
 export function createDefaultGrassConfig(): GrassFieldConfig {
@@ -332,7 +332,7 @@ function populateTerrainAndColorTextures(
 ): void {
   const size = terrain.size;
   const width = size + 1;
-  const worldRadius = IslandTerrain.radius;
+  const worldRadius = getTerrainRadius(terrain);
   const step = (2 * worldRadius) / size;
   const waterLevel = IslandTerrain.waterLevel;
   const caves = terrain.caves ?? [];
@@ -1195,6 +1195,7 @@ interface BakedGrassMapSnapshot {
   layersRef: TerrainData['layers'];
   revision: number;
   size: number;
+  worldRadius: number;
   biome: BiomeId;
   biomeGroundHex: string;
   biomeDetailHex: string;
@@ -1236,6 +1237,7 @@ export class StylizedGrassSystem {
   private hasPrevHero = false;
 
   private readonly terrainTexSize: number;
+  private readonly terrainWorldRadius: number;
   private readonly densityBias: number;
   private readonly biomeGroundHex: string;
   private readonly biomeDetailHex: string;
@@ -1317,9 +1319,10 @@ export class StylizedGrassSystem {
 
     const upgraded = ensureUpgradedTerrain(opts.terrain);
     this.terrainTexSize = upgraded.size + 1;
+    this.terrainWorldRadius = getTerrainRadius(upgraded);
     const texLen = this.terrainTexSize * this.terrainTexSize * 4;
 
-    const halfSpanChunks = Math.ceil(IslandTerrain.radius / GRASS_CHUNK_SIZE);
+    const halfSpanChunks = Math.ceil(this.terrainWorldRadius / GRASS_CHUNK_SIZE);
     this.worldGridOrigin = -halfSpanChunks * GRASS_CHUNK_SIZE;
     this.worldGridCols = halfSpanChunks * 2;
     const totalWorldCells = this.worldGridCols * this.worldGridCols;
@@ -1335,6 +1338,7 @@ export class StylizedGrassSystem {
         c.layersRef === upgraded.layers &&
         c.revision === (upgraded.revision ?? 0) &&
         c.size === upgraded.size &&
+        c.worldRadius === this.terrainWorldRadius &&
         c.biome === opts.biome &&
         c.biomeGroundHex === this.biomeGroundHex &&
         c.biomeDetailHex === this.biomeDetailHex &&
@@ -1383,6 +1387,7 @@ export class StylizedGrassSystem {
         layersRef: upgraded.layers,
         revision: upgraded.revision ?? 0,
         size: upgraded.size,
+        worldRadius: this.terrainWorldRadius,
         biome: opts.biome,
         biomeGroundHex: this.biomeGroundHex,
         biomeDetailHex: this.biomeDetailHex,
@@ -1512,7 +1517,7 @@ export class StylizedGrassSystem {
       trailTex: this.trailTex,
       terrainTexSize: this.terrainTexSize,
       trailTexSize: TRAIL_TEX_SIZE,
-      worldRadius: IslandTerrain.radius,
+      worldRadius: this.terrainWorldRadius,
       cellSpacing: spec.nearSpacing,
       isFarTuft: false,
       innerStart: 0.0,
@@ -1544,7 +1549,7 @@ export class StylizedGrassSystem {
       trailTex: this.trailTex,
       terrainTexSize: this.terrainTexSize,
       trailTexSize: TRAIL_TEX_SIZE,
-      worldRadius: IslandTerrain.radius,
+      worldRadius: this.terrainWorldRadius,
       cellSpacing: spec.farSpacing,
       isFarTuft: true,
       innerStart: farStart,
@@ -1614,7 +1619,7 @@ export class StylizedGrassSystem {
   }
 
   private recomputeChunkBounds(brushArea?: { x: number; z: number; radius: number }): void {
-    const worldRadius = IslandTerrain.radius;
+    const worldRadius = this.terrainWorldRadius;
     const texSize = this.terrainTexSize;
     const gridMax = texSize - 1;
     const data = this.terrainTexData;
@@ -1725,7 +1730,7 @@ export class StylizedGrassSystem {
 
     let bounds: { minRow: number; maxRow: number; minCol: number; maxCol: number } | undefined;
     if (brushArea) {
-      const worldRadius = IslandTerrain.radius;
+      const worldRadius = getTerrainRadius(terrain);
       const pad = brushArea.radius + 5.0;
       const size = terrain.size;
       bounds = {
@@ -1829,7 +1834,7 @@ export class StylizedGrassSystem {
 
     // 2. Stamp hero movement trail footprint into the active DataTexture
     if (this.config.interactiveParting && heroPosition) {
-      const worldRadius = IslandTerrain.radius;
+      const worldRadius = this.terrainWorldRadius;
       const hx = heroPosition.x;
       const hz = heroPosition.z;
       let moveDx = 0;

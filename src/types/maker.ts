@@ -1636,6 +1636,8 @@ export interface TerrainData {
   roads?: RoadSpline[];
   /** True when created from scratch or synced from WorldMapData (removes circular shore cutoff) */
   freeformWorld?: boolean;
+  /** Half-extent in meters for Lands larger than the default 156m island window */
+  worldRadius?: number;
   revision: number;
 }
 

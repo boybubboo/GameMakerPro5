@@ -91,7 +91,9 @@ import type {
 import {
   getWorldMapRadius,
   sampleWorldMapAtWorld,
+  sampleWorldMapInto,
   WORLD_TERRAIN_YELLOW,
+  type WorldMapSample,
 } from '../utils/worldMap';
 import {
   applySeamlessBoxUVs,
@@ -110,6 +112,7 @@ import {
   evaluateVistaHeight,
   getEnvironmentType,
   getLevelWallBoxes,
+  getTerrainRadius,
   IslandTerrain,
   MountainCave,
   normalizeCaveGrotto,
@@ -2378,11 +2381,27 @@ function populateWaterDepthFromPositions(
   positions: Float32Array,
   renderSize: number,
   waterDepthTexData: Float32Array,
-  waterDepthTexSize: number
+  waterDepthTexSize: number,
+  brushArea?: { x: number; z: number; radius: number },
+  worldRadius?: number
 ): void {
   const renderWidth = renderSize + 1;
   const maxTexIdx = waterDepthTexSize - 1;
-  for (let row = 0; row < waterDepthTexSize; row++) {
+  let rStart = 0;
+  let rEnd = maxTexIdx;
+  let cStart = 0;
+  let cEnd = maxTexIdx;
+
+  if (brushArea && worldRadius && worldRadius > 0) {
+    const pad = brushArea.radius + 10.0;
+    const worldDiameter = worldRadius * 2;
+    cStart = Math.max(0, Math.floor(((brushArea.x - pad + worldRadius) / worldDiameter) * maxTexIdx));
+    cEnd = Math.min(maxTexIdx, Math.ceil(((brushArea.x + pad + worldRadius) / worldDiameter) * maxTexIdx));
+    rStart = Math.max(0, Math.floor(((brushArea.z - pad + worldRadius) / worldDiameter) * maxTexIdx));
+    rEnd = Math.min(maxTexIdx, Math.ceil(((brushArea.z + pad + worldRadius) / worldDiameter) * maxTexIdx));
+  }
+
+  for (let row = rStart; row <= rEnd; row++) {
     const fz = (row / maxTexIdx) * renderSize;
     const r0 = Math.min(renderSize, Math.floor(fz));
     const r1 = Math.min(renderSize, r0 + 1);
@@ -2390,7 +2409,7 @@ function populateWaterDepthFromPositions(
     const row0Off = r0 * renderWidth;
     const row1Off = r1 * renderWidth;
     const outRowOff = row * waterDepthTexSize;
-    for (let col = 0; col < waterDepthTexSize; col++) {
+    for (let col = cStart; col <= cEnd; col++) {
       const fx = (col / maxTexIdx) * renderSize;
       const c0 = Math.min(renderSize, Math.floor(fx));
       const c1 = Math.min(renderSize, c0 + 1);
@@ -2461,7 +2480,7 @@ export function buildIslandMesh(
   const wmRevision = worldMapContext?.worldMap?.revision ?? 0;
   const worldRadius = isWorldMapMode
     ? getWorldMapRadius(worldMapContext?.worldMap)
-    : IslandTerrain.radius;
+    : getTerrainRadius(terrain);
   const regionOriginKey = worldMapContext?.activeRegionOrigin
     ? `${worldMapContext.activeRegionOrigin[0]},${worldMapContext.activeRegionOrigin[1]}`
     : '0,0';
@@ -2527,7 +2546,6 @@ export function buildIslandMesh(
     w1 = new Float32Array(renderWidth * renderWidth * 3);
     weather0 = new Float32Array(renderWidth * renderWidth * 4);
     weather1 = new Float32Array(renderWidth * renderWidth);
-    const indicesList: number[] = [];
 
     populateSubdividedTerrainAttributes(
       terrain,
@@ -2543,29 +2561,48 @@ export function buildIslandMesh(
       worldRadius
     );
 
-    for (let row = 0; row < renderSize; row++) {
-      for (let col = 0; col < renderSize; col++) {
-        const vx = -worldRadius + (col + 0.5) * renderStep;
-        const vz = -worldRadius + (row + 0.5) * renderStep;
-        if (!isFreeform && Math.hypot(vx, vz) > IslandTerrain.shoreRadius) continue;
+    const maxIndexCount = renderSize * renderSize * 6;
+    const rawIndices =
+      renderWidth * renderWidth > 65535
+        ? new Uint32Array(maxIndexCount)
+        : new Uint16Array(maxIndexCount);
+    let indexPtr = 0;
+    const shoreRadiusSq = IslandTerrain.shoreRadius * IslandTerrain.shoreRadius;
 
-        const a = row * renderWidth + col;
+    for (let row = 0; row < renderSize; row++) {
+      const vz = -worldRadius + (row + 0.5) * renderStep;
+      const vzSq = vz * vz;
+      const rowBase = row * renderWidth;
+      for (let col = 0; col < renderSize; col++) {
+        if (!isFreeform) {
+          const vx = -worldRadius + (col + 0.5) * renderStep;
+          if (vx * vx + vzSq > shoreRadiusSq) continue;
+        }
+
+        const a = rowBase + col;
         const b = a + 1;
-        const c = (row + 1) * renderWidth + col;
+        const c = a + renderWidth;
         const d = c + 1;
         // Alternate quad diagonal every checkerboard cell to remove directional stair-stepping on curves
         if (((row + col) & 1) === 0) {
-          indicesList.push(a, c, b, b, c, d);
+          rawIndices[indexPtr++] = a;
+          rawIndices[indexPtr++] = c;
+          rawIndices[indexPtr++] = b;
+          rawIndices[indexPtr++] = b;
+          rawIndices[indexPtr++] = c;
+          rawIndices[indexPtr++] = d;
         } else {
-          indicesList.push(a, c, d, a, d, b);
+          rawIndices[indexPtr++] = a;
+          rawIndices[indexPtr++] = c;
+          rawIndices[indexPtr++] = d;
+          rawIndices[indexPtr++] = a;
+          rawIndices[indexPtr++] = d;
+          rawIndices[indexPtr++] = b;
         }
       }
     }
 
-    const indexArray =
-      renderWidth * renderWidth > 65535
-        ? new Uint32Array(indicesList)
-        : new Uint16Array(indicesList);
+    const indexArray = indexPtr === maxIndexCount ? rawIndices : rawIndices.slice(0, indexPtr);
 
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
@@ -2645,11 +2682,16 @@ export function buildIslandMesh(
 
   // Animated Water Sea & River Plane with terrain-depth shoreline fade, organic foam & Fresnel sheen
   const atlas = getTerrainTextureAtlas();
-  const oceanPlaneSize = isWorldMapMode ? Math.max(4800, worldRadius * 7.2) : 1150;
+  const oceanPlaneSize = isWorldMapMode
+    ? Math.max(4800, worldRadius * 7.2)
+    : Math.max(1150, worldRadius * 6.5);
   const waterGeo = new THREE.PlaneGeometry(oceanPlaneSize, oceanPlaneSize, 72, 72);
   waterGeo.rotateX(-Math.PI / 2);
   const waterNormal = atlas.waterNormal;
-  waterNormal.repeat.set(isWorldMapMode ? 175 : 42, isWorldMapMode ? 175 : 42);
+  waterNormal.repeat.set(
+    isWorldMapMode ? 175 : Math.max(42, Math.round((worldRadius / IslandTerrain.radius) * 42)),
+    isWorldMapMode ? 175 : Math.max(42, Math.round((worldRadius / IslandTerrain.radius) * 42))
+  );
 
   // Live terrain elevation DataTexture (FloatType + NearestFilter + manual 4-tap bilinear in TSL)
   // Gives exact per-pixel water depth across coasts, coves, and sculpted rivers on both WebGPU & WebGL2.
@@ -2877,7 +2919,8 @@ export function buildIslandMesh(
     waterDepthTex,
     waterDepthTexSize,
     timeUniform,
-    style
+    style,
+    worldRadius
   );
   if (waterBodyGroupBundle.group.children.length > 0) {
     islandGroup.add(waterBodyGroupBundle.group);
@@ -3278,7 +3321,7 @@ function populateWaterDepthTexture(
   size: number,
   brushArea?: { x: number; z: number; radius: number }
 ): void {
-  const worldRadius = IslandTerrain.radius;
+  const worldRadius = getTerrainRadius(terrain);
   const worldDiameter = worldRadius * 2;
   const maxIdx = size - 1;
   let rStart = 0;
@@ -3309,6 +3352,58 @@ function populateWaterDepthTexture(
   }
 }
 
+const _attrOceanCol = new THREE.Color('#1B6B93');
+const _attrYellowCol = new THREE.Color(WORLD_TERRAIN_YELLOW);
+const _attrTmpCol = new THREE.Color();
+const _attrRegionColMap = new Map<number, THREE.Color>();
+const _attrGauss = [1, 4, 6, 4, 1];
+const _attrAcc = new Float32Array(7);
+const _attrWmScratch: WorldMapSample = { land: 0, regionCode: 0, isBorder: false };
+
+function recomputeTerrainGridNormalsBounds(
+  positions: Float32Array,
+  normals: Float32Array,
+  renderSize: number,
+  renderStep: number,
+  bounds: { minRow: number; maxRow: number; minCol: number; maxCol: number }
+): void {
+  const renderWidth = renderSize + 1;
+  const rStart = Math.max(0, bounds.minRow - 1);
+  const rEnd = Math.min(renderSize, bounds.maxRow + 1);
+  const cStart = Math.max(0, bounds.minCol - 1);
+  const cEnd = Math.min(renderSize, bounds.maxCol + 1);
+
+  for (let row = rStart; row <= rEnd; row++) {
+    const rU = row > 0 ? row - 1 : 0;
+    const rD = row < renderSize ? row + 1 : renderSize;
+    const spanZ = Math.max(0.001, (rD - rU) * renderStep);
+    const rowOff = row * renderWidth;
+    const uOff = rU * renderWidth;
+    const dOff = rD * renderWidth;
+
+    for (let col = cStart; col <= cEnd; col++) {
+      const cL = col > 0 ? col - 1 : 0;
+      const cR = col < renderSize ? col + 1 : renderSize;
+      const spanX = Math.max(0.001, (cR - cL) * renderStep);
+
+      const hL = positions[(rowOff + cL) * 3 + 1];
+      const hR = positions[(rowOff + cR) * 3 + 1];
+      const hU = positions[(uOff + col) * 3 + 1];
+      const hD = positions[(dOff + col) * 3 + 1];
+
+      const nx = -(hR - hL) / spanX;
+      const ny = 1.0;
+      const nz = -(hD - hU) / spanZ;
+      const invLen = 1 / Math.hypot(nx, ny, nz);
+
+      const nIdx = (rowOff + col) * 3;
+      normals[nIdx] = nx * invLen;
+      normals[nIdx + 1] = ny * invLen;
+      normals[nIdx + 2] = nz * invLen;
+    }
+  }
+}
+
 /**
  * Evaluates 2x-subdivided terrain vertices using Catmull-Rom bicubic heights and a smooth
  * 5x5 Gaussian multi-material splat filter across ALL 7 terrain layers (eliminating chunky stairs).
@@ -3333,7 +3428,7 @@ function populateSubdividedTerrainAttributes(
     worldRadiusOverride ??
     (worldMapContext?.mode === 'worldMap'
       ? getWorldMapRadius(worldMapContext.worldMap)
-      : IslandTerrain.radius);
+      : getTerrainRadius(terrain));
   const renderStep = (2 * worldRadius) / renderSize;
   const rStart = bounds ? Math.max(0, bounds.minRow) : 0;
   const rEnd = bounds ? Math.min(renderSize, bounds.maxRow) : renderSize;
@@ -3350,19 +3445,20 @@ function populateSubdividedTerrainAttributes(
   const checkOtherLand =
     worldMapContext?.mode === 'land' && Boolean(wm) && activeRegionCode > 0;
 
-  const oceanCol = new THREE.Color('#1B6B93');
-  const yellowTerrainCol = new THREE.Color(WORLD_TERRAIN_YELLOW);
-  const regionColMap = new Map<number, THREE.Color>();
-  if (wm) {
+  const oceanCol = _attrOceanCol;
+  const yellowTerrainCol = _attrYellowCol;
+  const regionColMap = _attrRegionColMap;
+  if (isWorldMap && wm) {
+    regionColMap.clear();
     for (const r of wm.regions) {
       regionColMap.set(r.code, new THREE.Color(r.colorHex));
     }
   }
-  const tmpWorldCol = new THREE.Color();
+  const tmpWorldCol = _attrTmpCol;
 
   // Separable 5-tap Gaussian weights [1, 4, 6, 4, 1] for buttery multi-material edge blending
-  const gauss = [1, 4, 6, 4, 1];
-  const acc = new Float32Array(7);
+  const gauss = _attrGauss;
+  const acc = _attrAcc;
 
   for (let row = rStart; row <= rEnd; row++) {
     const vz = -worldRadius + row * renderStep;
@@ -3374,12 +3470,12 @@ function populateSubdividedTerrainAttributes(
       const idx = row * renderWidth + col;
       let h = isWorldMap ? IslandTerrain.seaFloor : sampleTerrainHeight(terrain, vx, vz);
 
-      let wmSample: { land: number; regionCode: number; isBorder: boolean } | null = null;
+      let wmSample: WorldMapSample | null = null;
       if (isWorldMap && wm) {
-        wmSample = sampleWorldMapAtWorld(wm, vx, vz);
+        wmSample = sampleWorldMapInto(wm, vx, vz, _attrWmScratch);
         h = wmSample.land === 1 ? (wmSample.isBorder ? 0.55 : IslandTerrain.baseTop) : IslandTerrain.seaFloor;
       } else if (checkOtherLand && wm) {
-        wmSample = sampleWorldMapAtWorld(wm, activeOriginX + vx, activeOriginZ + vz);
+        wmSample = sampleWorldMapInto(wm, activeOriginX + vx, activeOriginZ + vz, _attrWmScratch);
       }
 
       positions[idx * 3] = vx;
@@ -3519,7 +3615,7 @@ export function updateIslandTerrainGeometryInPlace(
     handles.terrainWorldRadius ??
     (worldMapContext?.mode === 'worldMap'
       ? getWorldMapRadius(worldMapContext.worldMap)
-      : IslandTerrain.radius);
+      : getTerrainRadius(terrain));
   let bounds: { minRow: number; maxRow: number; minCol: number; maxCol: number } | undefined;
   if (brushArea) {
     const pad = brushArea.radius + 7.5;
@@ -3550,8 +3646,22 @@ export function updateIslandTerrainGeometryInPlace(
   w1Attr.needsUpdate = true;
   weather0Attr.needsUpdate = true;
   weather1Attr.needsUpdate = true;
-  geo.computeVertexNormals();
-  geo.computeBoundingSphere();
+
+  const normAttr = geo.attributes.normal as THREE.BufferAttribute | undefined;
+  if (bounds && normAttr) {
+    recomputeTerrainGridNormalsBounds(
+      posAttr.array as Float32Array,
+      normAttr.array as Float32Array,
+      renderSize,
+      (2 * worldRadius) / renderSize,
+      bounds
+    );
+    normAttr.needsUpdate = true;
+  } else {
+    geo.computeVertexNormals();
+    geo.computeBoundingSphere();
+  }
+
   handles.updateWorldMapUniforms?.(worldMapContext);
   if (worldMapContext?.mode === 'worldMap' && worldMapContext.worldMap) {
     if (handles.waterDepthTex && handles.waterDepthTexData && handles.waterDepthTexSize) {
@@ -3559,7 +3669,9 @@ export function updateIslandTerrainGeometryInPlace(
         posAttr.array as Float32Array,
         renderSize,
         handles.waterDepthTexData,
-        handles.waterDepthTexSize
+        handles.waterDepthTexSize,
+        brushArea,
+        worldRadius
       );
       handles.waterDepthTex.needsUpdate = true;
     }
@@ -3950,7 +4062,8 @@ function buildWaterBodiesGroup(
   waterDepthTex: THREE.DataTexture,
   waterDepthTexSize: number,
   timeUniform: { value: number },
-  style: VisualStyleId
+  style: VisualStyleId,
+  terrainWorldRadius: number = IslandTerrain.radius
 ): {
   group: THREE.Group;
   updateUniforms: (bodies?: WaterBodyConfig[], selectedWaterBodyId?: string | null) => void;
@@ -4058,8 +4171,8 @@ function buildWaterBodiesGroup(
     mat.positionNode = vec3(positionLocal.x, positionLocal.y.add(wv1).add(wv2), positionLocal.z);
 
     mat.colorNode = Fn(() => {
-      const worldRadius = float(IslandTerrain.radius);
-      const worldDiameter = float(IslandTerrain.radius * 2.0);
+      const worldRadius = float(terrainWorldRadius);
+      const worldDiameter = float(terrainWorldRadius * 2.0);
       const wp = positionWorld;
       const terrainUv = vec2(wp.x, wp.z).add(worldRadius).div(worldDiameter);
       const texRes = float(waterDepthTexSize);
@@ -4163,14 +4276,15 @@ function buildDirtPebblesGroup(
   if (cfg.pebbleDensity <= 0.02) return null;
 
   const dirtCells: [number, number][] = [];
-  const step = (IslandTerrain.radius * 2) / terrain.size;
+  const terrainRadius = getTerrainRadius(terrain);
+  const step = (terrainRadius * 2) / terrain.size;
   for (let row = 1; row < terrain.size; row++) {
     for (let col = 1; col < terrain.size; col++) {
       const idx = row * (terrain.size + 1) + col;
       if (terrain.layers[idx] === 6) {
-        const wx = -IslandTerrain.radius + col * step;
-        const wz = -IslandTerrain.radius + row * step;
-        if (Math.hypot(wx, wz) < IslandTerrain.shoreRadius - 4) {
+        const wx = -terrainRadius + col * step;
+        const wz = -terrainRadius + row * step;
+        if (terrain.freeformWorld || Math.hypot(wx, wz) < IslandTerrain.shoreRadius - 4) {
           dirtCells.push([wx, wz]);
         }
       }

@@ -271,7 +271,11 @@ class EditorResourceMonitor {
 
     const highHeapPressure = usagePct !== undefined && usagePct >= 75;
     const sustainedGrowth = deltaFromBaselineMB >= 32 && this.consecutiveGrowthCount >= 3;
-    const rapidSpike = deltaFromBaselineMB >= 24 && growthMBPerMin >= 30;
+    const rapidSpike =
+      deltaFromBaselineMB >= 24 &&
+      deltaFromPreviousMB >= 4 &&
+      this.consecutiveGrowthCount >= 2 &&
+      growthMBPerMin >= 30;
     const leakSuspected = highHeapPressure || sustainedGrowth || rapidSpike;
 
     let hint: string | undefined;

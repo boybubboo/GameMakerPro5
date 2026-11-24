@@ -35,6 +35,7 @@ export type AssetsSourceFilter = 'all' | 'procedural' | 'glb';
 export interface LeftAssetsPanelProps {
   store: MakerStore;
   activePlacementAssetId: string | null;
+  hideBuildingsSection?: boolean;
   onSelectPlacementAsset: (asset: CustomAssetMeta) => void;
   onEditAssetInObjectMaker: (assetId: string) => void;
   onEditAssetInPlantMaker?: (assetId: string) => void;
@@ -128,6 +129,7 @@ export function isProceduralAsset(asset: CustomAssetMeta): boolean {
 export const LeftAssetsPanel: React.FC<LeftAssetsPanelProps> = ({
   store,
   activePlacementAssetId,
+  hideBuildingsSection = false,
   onSelectPlacementAsset,
   onEditAssetInObjectMaker,
   onEditAssetInPlantMaker,
@@ -152,6 +154,17 @@ export const LeftAssetsPanel: React.FC<LeftAssetsPanelProps> = ({
   );
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const dropdownContainerRef = useRef<HTMLDivElement | null>(null);
+
+  const visibleSections = useMemo(
+    () => (hideBuildingsSection ? SECTIONS.filter((s) => s.id !== 'buildings') : SECTIONS),
+    [hideBuildingsSection]
+  );
+
+  useEffect(() => {
+    if (hideBuildingsSection && activeSection === 'buildings') {
+      setActiveSection('all');
+    }
+  }, [hideBuildingsSection, activeSection]);
 
   useEffect(() => {
     if (activePlacementAssetId) {
@@ -183,6 +196,7 @@ export const LeftAssetsPanel: React.FC<LeftAssetsPanelProps> = ({
   const baseFilteredAssets = useMemo(() => {
     const q = search.trim().toLowerCase();
     return store.customAssets.filter((a) => {
+      if (hideBuildingsSection && a.category === 'building') return false;
       if (favoritesOnly && !a.favorite) return false;
       const proc = isProceduralAsset(a);
       if (sourceFilter === 'procedural' && !proc) return false;
@@ -190,7 +204,7 @@ export const LeftAssetsPanel: React.FC<LeftAssetsPanelProps> = ({
       if (!q) return true;
       return a.name.toLowerCase().includes(q) || a.category.toLowerCase().includes(q);
     });
-  }, [store.customAssets, search, sourceFilter, favoritesOnly]);
+  }, [store.customAssets, hideBuildingsSection, search, sourceFilter, favoritesOnly]);
 
   const sectionCounts = useMemo(() => {
     const counts: Record<AssetsPanelSectionId, number> = {
@@ -202,7 +216,7 @@ export const LeftAssetsPanel: React.FC<LeftAssetsPanelProps> = ({
       buildings: 0,
     };
     for (const a of baseFilteredAssets) {
-      for (const sec of SECTIONS) {
+      for (const sec of visibleSections) {
         if (sec.id !== 'all' && sec.matches(a)) {
           counts[sec.id] += 1;
           break;
@@ -210,11 +224,11 @@ export const LeftAssetsPanel: React.FC<LeftAssetsPanelProps> = ({
       }
     }
     return counts;
-  }, [baseFilteredAssets]);
+  }, [baseFilteredAssets, visibleSections]);
 
   const activeSectionMeta = useMemo(
-    () => SECTIONS.find((s) => s.id === activeSection) ?? SECTIONS[0],
-    [activeSection]
+    () => visibleSections.find((s) => s.id === activeSection) ?? visibleSections[0],
+    [activeSection, visibleSections]
   );
 
   const visibleAssets = useMemo(() => {
@@ -349,7 +363,7 @@ export const LeftAssetsPanel: React.FC<LeftAssetsPanelProps> = ({
               aria-label="Asset categories"
               className="absolute left-0 right-0 top-full mt-1.5 z-40 rounded-2xl bg-white dark:bg-[#191E2B] border border-slate-200/90 dark:border-white/[0.12] shadow-xl p-1.5 space-y-0.5"
             >
-              {SECTIONS.map((sec) => {
+              {visibleSections.map((sec) => {
                 const Icon = sec.Icon;
                 const isActive = activeSection === sec.id;
                 const count = sectionCounts[sec.id];

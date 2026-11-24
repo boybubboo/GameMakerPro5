@@ -696,7 +696,9 @@ export const WorldStage: React.FC<{ store: MakerStore }> = ({ store }) => {
   );
 
   const visibleDomains = WORLD_DOMAINS.filter(
-    (d) => !d.openWorldOnly || envType === 'openWorld'
+    (d) =>
+      (!d.openWorldOnly || envType === 'openWorld') &&
+      !(d.id === 'buildings' && store.worldViewMode === '2d')
   );
   const isWorldMapScope = envType === 'openWorld' && store.worldEditorScope === 'worldMap';
   const wm = store.resolvedWorldMap;
@@ -724,6 +726,7 @@ export const WorldStage: React.FC<{ store: MakerStore }> = ({ store }) => {
         <LeftAssetsPanel
           store={store}
           activePlacementAssetId={activePlacementAssetId}
+          hideBuildingsSection={isWorldMapScope || store.worldViewMode === '2d'}
           onSelectPlacementAsset={(asset) => {
             if (isWorldMapScope) {
               const targetRegion = wmRegions[0] ?? store.addWorldLandRegion('Land 1');
@@ -1683,13 +1686,345 @@ export const WorldStage: React.FC<{ store: MakerStore }> = ({ store }) => {
         </aside>
       )}
 
-      {/* Center: 3D Viewport / 2D Overview Painter + Job Dock */}
+      {/* Center: Docked Viewport Header + Unobstructed Map/3D Frame + Job Dock */}
       <main
         className={`shrink-0 lg:shrink lg:flex-1 lg:h-full lg:min-h-0 lg:min-w-0 flex flex-col lg:overflow-hidden ${
-          showLeftPanel ? 'p-2.5 sm:p-3 gap-2.5' : 'p-2 gap-2'
+          showLeftPanel ? 'p-2.5 sm:p-3 gap-2' : 'p-2 gap-2'
         }`}
       >
-        <div className="h-[360px] sm:h-[440px] lg:h-auto lg:flex-1 min-h-[260px] rounded-2xl overflow-hidden border border-slate-200/80 dark:border-white/[0.1] shadow-sm relative bg-[#0B0F1A]">
+        {/* Docked Top Viewport Control Bar (never overlaps the map or 3D scene) */}
+        <div className="shrink-0 flex flex-wrap items-center justify-between gap-2 px-2.5 py-1.5 rounded-xl bg-white dark:bg-[#171A23] border border-slate-200/80 dark:border-white/[0.08]">
+          <div className="flex flex-wrap items-center gap-1.5">
+            {!showLeftPanel && isWorldMapScope && store.worldViewMode === '2d' && (
+              <div className="inline-flex items-center gap-1 p-0.5 rounded-lg bg-slate-100 dark:bg-[#12151E] border border-slate-200/80 dark:border-white/[0.08]">
+                <button
+                  type="button"
+                  onClick={() => setLeftPanel('level')}
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-extrabold bg-[#7C5CFF]/15 text-[#7C5CFF] whitespace-nowrap"
+                >
+                  <PanelLeftOpen size={12} />
+                  <span>Contents</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLeftPanel('assets')}
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-extrabold text-slate-600 dark:text-[#C8D0E4] hover:text-[#7C5CFF] whitespace-nowrap"
+                >
+                  <Shapes size={12} />
+                  <span>Assets ({store.customAssets.length})</span>
+                </button>
+              </div>
+            )}
+
+            {envType === 'openWorld' && (
+              <div className="inline-flex items-center p-0.5 rounded-xl bg-slate-100 dark:bg-[#12151E] border border-slate-200/80 dark:border-white/[0.08]">
+                <button
+                  type="button"
+                  onClick={() => store.setWorldViewMode('3d')}
+                  className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-extrabold transition-colors whitespace-nowrap ${
+                    store.worldViewMode === '3d'
+                      ? 'bg-[#7C5CFF] text-white'
+                      : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  <Eye size={12} />
+                  <span>3D View</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    store.setWorldViewMode('2d');
+                    if (store.activeWorldDomain === 'buildings') {
+                      store.setActiveWorldDomain('select');
+                    }
+                    if (tool === 'add' && addPaletteMode === 'blocks') {
+                      setTool('move');
+                    }
+                  }}
+                  className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-extrabold transition-colors whitespace-nowrap ${
+                    store.worldViewMode === '2d'
+                      ? 'bg-[#20B46A] text-white'
+                      : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  <MapIcon size={12} />
+                  <span>2D Painter</span>
+                </button>
+              </div>
+            )}
+
+            {store.worldViewMode === '3d' ? (
+              <>
+                <div className="inline-flex items-center gap-0.5 p-0.5 rounded-xl bg-slate-100 dark:bg-[#12151E] border border-slate-200/80 dark:border-white/[0.08] text-slate-700 dark:text-white">
+                  <Compass size={12} className="mx-1.5 text-slate-400" />
+                  {(
+                    [
+                      { id: 'iso', label: 'Iso' },
+                      { id: 'top', label: 'Top' },
+                      { id: 'north', label: 'N' },
+                      { id: 'east', label: 'E' },
+                    ] as const
+                  ).map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() =>
+                        setCameraPresetRequest({ preset: p.id, nonce: Date.now() + Math.random() })
+                      }
+                      className="px-2 py-1 rounded-lg text-[10px] font-extrabold hover:bg-slate-200/70 dark:hover:bg-white/15 transition-colors"
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => store.setCameraAngleLocked(!store.cameraAngleLocked)}
+                  title="Lock camera orbit/pan while placing details (Shortcut: L)"
+                  className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-[11px] font-extrabold border transition-colors whitespace-nowrap ${
+                    store.cameraAngleLocked
+                      ? 'bg-[#F59E0B] border-[#F59E0B] text-white'
+                      : 'bg-slate-100 dark:bg-[#12151E] border-slate-200/80 dark:border-white/[0.08] text-slate-700 dark:text-slate-200 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  {store.cameraAngleLocked ? <Lock size={11} /> : <Unlock size={11} />}
+                  <span>{store.cameraAngleLocked ? 'Angle Locked (L)' : 'Lock Angle (L)'}</span>
+                </button>
+              </>
+            ) : (
+              <span className="hidden xl:inline text-[11px] font-medium text-slate-500 dark:text-[#8E96AB] pl-1">
+                Shift+Drag or Right-Drag to pan · Scroll to zoom
+                {isWorldMapScope ? ' · Double-click a Land to edit' : ''}
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            {envType === 'openWorld' && (
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setScratchMenuOpen((v) => !v);
+                    setLandMenuOpen(false);
+                  }}
+                  title="Start from a blank ocean world or reset the active land"
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-100 dark:bg-[#12151E] hover:bg-slate-200/70 dark:hover:bg-[#1F2430] text-slate-800 dark:text-white text-[11px] font-bold border border-slate-200/80 dark:border-white/[0.08]"
+                >
+                  <RotateCcw size={12} className="text-[#F59E0B]" />
+                  <span>New</span>
+                </button>
+                {scratchMenuOpen && (
+                  <>
+                    <div
+                      className="fixed inset-0 z-20"
+                      onClick={() => setScratchMenuOpen(false)}
+                    />
+                    <div className="absolute right-0 mt-1.5 w-60 rounded-2xl bg-white dark:bg-[#171A23] shadow-2xl border border-slate-200/80 dark:border-white/[0.1] p-2 space-y-1.5 z-30">
+                      <div className="px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+                        Start from Scratch
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          store.startWorldFromScratch('world');
+                          setScratchMenuOpen(false);
+                        }}
+                        className="w-full flex items-start gap-2 px-2.5 py-2 rounded-xl text-left hover:bg-rose-500/10 text-slate-800 dark:text-slate-100 transition-colors"
+                      >
+                        <Globe size={14} className="text-[#F2545B] shrink-0 mt-0.5" />
+                        <span>
+                          <span className="block text-xs font-extrabold text-[#F2545B]">
+                            Blank Ocean World
+                          </span>
+                          <span className="block text-[10px] text-slate-500 dark:text-[#949BB0]">
+                            Clear everything and paint landmasses from zero
+                          </span>
+                        </span>
+                      </button>
+                      {!isWorldMapScope && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            store.startWorldFromScratch('currentLand');
+                            setScratchMenuOpen(false);
+                          }}
+                          className="w-full flex items-start gap-2 px-2.5 py-2 rounded-xl text-left hover:bg-amber-500/10 text-slate-800 dark:text-slate-100 transition-colors"
+                        >
+                          <Eraser size={14} className="text-[#F59E0B] shrink-0 mt-0.5" />
+                          <span>
+                            <span className="block text-xs font-extrabold">
+                              Reset Current Land
+                            </span>
+                            <span className="block text-[10px] text-slate-500 dark:text-[#949BB0]">
+                              Flatten sculpting &amp; remove props in {currentLevel.name}
+                            </span>
+                          </span>
+                        </button>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setShowingMap(true)}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-100 dark:bg-[#12151E] hover:bg-slate-200/70 dark:hover:bg-[#1F2430] text-slate-800 dark:text-white text-[11px] font-bold border border-slate-200/80 dark:border-white/[0.08]"
+            >
+              <MapIcon size={12} className="text-[#7C5CFF]" />
+              <span>Map</span>
+            </button>
+
+            {envType === 'openWorld' && (
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLandMenuOpen((v) => !v);
+                    setScratchMenuOpen(false);
+                  }}
+                  data-testid="world-scope-dropdown"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 dark:bg-[#12151E] hover:bg-slate-800 dark:hover:bg-[#1F2430] text-white text-[11px] font-extrabold border border-slate-700 dark:border-white/[0.12]"
+                  title="Switch between the World Map overview and any named Land / Level"
+                >
+                  {isWorldMapScope ? (
+                    <Globe size={12} style={{ color: WORLD_TERRAIN_YELLOW }} />
+                  ) : (
+                    <span
+                      className="w-2.5 h-2.5 rounded-full border border-white/40 shrink-0"
+                      style={{ backgroundColor: activeRegion?.colorHex ?? '#7C5CFF' }}
+                    />
+                  )}
+                  <span className="max-w-[120px] truncate">
+                    {isWorldMapScope ? 'World Map' : currentLevel.name}
+                  </span>
+                  <ChevronDown size={12} className="opacity-75" />
+                </button>
+
+                {landMenuOpen && (
+                  <>
+                    <div
+                      className="fixed inset-0 z-20"
+                      onClick={() => setLandMenuOpen(false)}
+                    />
+                    <div className="absolute right-0 mt-1.5 w-64 rounded-2xl bg-white dark:bg-[#171A23] shadow-2xl border border-slate-200/80 dark:border-white/[0.1] p-1.5 space-y-1 z-30">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          store.enterWorldEditorScope('worldMap');
+                          setLandMenuOpen(false);
+                        }}
+                        className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-xl text-left text-xs font-extrabold transition-colors ${
+                          isWorldMapScope
+                            ? 'bg-[#7C5CFF]/15 text-[#7C5CFF]'
+                            : 'hover:bg-slate-100 dark:hover:bg-[#1F2430] text-slate-800 dark:text-slate-100'
+                        }`}
+                      >
+                        <Globe size={13} style={{ color: WORLD_TERRAIN_YELLOW }} />
+                        <span className="flex-1 truncate">World Map (Overview)</span>
+                        {isWorldMapScope && <Check size={12} />}
+                      </button>
+
+                      <div className="my-1 border-t border-slate-200/70 dark:border-white/[0.08]" />
+                      <div className="px-2.5 py-0.5 text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+                        Lands &amp; Levels ({wmRegions.length + extraNonRegionLevels.length})
+                      </div>
+
+                      {wmRegions.length === 0 && extraNonRegionLevels.length === 0 ? (
+                        <div className="px-2.5 py-2 text-[11px] text-slate-500 dark:text-[#949BB0]">
+                          Paint yellow terrain, then name your first Land below.
+                        </div>
+                      ) : (
+                        <div className="max-h-56 overflow-y-auto maker-scroll space-y-0.5">
+                          {wmRegions.map((reg) => {
+                            const active = !isWorldMapScope && currentLevel.id === reg.levelId;
+                            return (
+                              <button
+                                key={reg.id}
+                                type="button"
+                                onClick={() => {
+                                  store.enterWorldEditorScope(reg.levelId);
+                                  setLandMenuOpen(false);
+                                }}
+                                className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl text-left text-xs font-bold transition-colors ${
+                                  active
+                                    ? 'bg-[#7C5CFF]/15 text-[#7C5CFF]'
+                                    : 'hover:bg-slate-100 dark:hover:bg-[#1F2430] text-slate-700 dark:text-slate-200'
+                                }`}
+                              >
+                                <span
+                                  className="w-3 h-3 rounded-sm border border-black/20 shrink-0"
+                                  style={{ backgroundColor: reg.colorHex }}
+                                />
+                                <span className="flex-1 truncate">{reg.name}</span>
+                                {active && <Check size={12} />}
+                              </button>
+                            );
+                          })}
+                          {extraNonRegionLevels.map((lvl) => {
+                            const active = !isWorldMapScope && currentLevel.id === lvl.id;
+                            return (
+                              <button
+                                key={lvl.id}
+                                type="button"
+                                onClick={() => {
+                                  store.enterWorldEditorScope(lvl.id);
+                                  setLandMenuOpen(false);
+                                }}
+                                className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl text-left text-xs font-bold transition-colors ${
+                                  active
+                                    ? 'bg-[#7C5CFF]/15 text-[#7C5CFF]'
+                                    : 'hover:bg-slate-100 dark:hover:bg-[#1F2430] text-slate-700 dark:text-slate-200'
+                                }`}
+                              >
+                                <MapIcon size={12} className="text-slate-400 shrink-0" />
+                                <span className="flex-1 truncate">{lvl.name}</span>
+                                {active && <Check size={12} />}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      <div className="pt-1 border-t border-slate-200/70 dark:border-white/[0.08] flex gap-1 px-1 pb-0.5">
+                        <input
+                          type="text"
+                          value={quickLandName}
+                          onChange={(e) => setQuickLandName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              store.addWorldLandRegion(quickLandName.trim() || undefined);
+                              setQuickLandName('');
+                              setTool('terrain');
+                            }
+                          }}
+                          placeholder={`New Land ${wmRegions.length + 1}…`}
+                          className="flex-1 min-w-0 px-2 py-1 rounded-lg bg-slate-100 dark:bg-[#1F2430] text-xs font-semibold outline-none focus:ring-1 focus:ring-[#7C5CFF]"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            store.addWorldLandRegion(quickLandName.trim() || undefined);
+                            setQuickLandName('');
+                            setTool('terrain');
+                          }}
+                          className="px-2 py-1 rounded-lg bg-[#7C5CFF] text-white text-[11px] font-extrabold shrink-0"
+                        >
+                          + Land
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="h-[420px] sm:h-[480px] lg:h-auto lg:flex-1 min-h-[280px] rounded-2xl overflow-hidden border border-slate-200/80 dark:border-white/[0.1] shadow-sm relative bg-[#0B0F1A]">
           {!store.isPlaying &&
             (store.worldViewMode === '2d' && envType === 'openWorld' ? (
               <Overview2DPainter
@@ -1945,306 +2280,10 @@ export const WorldStage: React.FC<{ store: MakerStore }> = ({ store }) => {
                 }}
               />
             ))}
-
-          {/* Top-Left Viewport Mode, Camera Presets & Angle Lock */}
-          <div className="absolute top-3 left-3 flex flex-wrap items-center gap-1.5 z-10">
-            {envType === 'openWorld' && (
-              <div className="inline-flex items-center p-0.5 rounded-xl bg-black/75 border border-white/15">
-                <button
-                  type="button"
-                  onClick={() => store.setWorldViewMode('3d')}
-                  className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-extrabold transition-colors ${
-                    store.worldViewMode === '3d'
-                      ? 'bg-[#7C5CFF] text-white'
-                      : 'text-slate-300 hover:text-white'
-                  }`}
-                >
-                  <Eye size={12} />
-                  <span>3D View</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => store.setWorldViewMode('2d')}
-                  className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-extrabold transition-colors ${
-                    store.worldViewMode === '2d'
-                      ? 'bg-[#20B46A] text-white'
-                      : 'text-slate-300 hover:text-white'
-                  }`}
-                >
-                  <MapIcon size={12} />
-                  <span>2D Painter</span>
-                </button>
-              </div>
-            )}
-
-            {store.worldViewMode === '3d' && (
-              <>
-                <div className="inline-flex items-center gap-0.5 p-0.5 rounded-xl bg-black/75 border border-white/15 text-white">
-                  <Compass size={12} className="mx-1.5 text-slate-400" />
-                  {(
-                    [
-                      { id: 'iso', label: 'Iso' },
-                      { id: 'top', label: 'Top' },
-                      { id: 'north', label: 'N' },
-                      { id: 'east', label: 'E' },
-                    ] as const
-                  ).map((p) => (
-                    <button
-                      key={p.id}
-                      type="button"
-                      onClick={() =>
-                        setCameraPresetRequest({ preset: p.id, nonce: Date.now() + Math.random() })
-                      }
-                      className="px-2 py-1 rounded-lg text-[10px] font-extrabold hover:bg-white/15 transition-colors"
-                    >
-                      {p.label}
-                    </button>
-                  ))}
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => store.setCameraAngleLocked(!store.cameraAngleLocked)}
-                  title="Lock camera orbit/pan while placing details (Shortcut: L)"
-                  className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-[11px] font-extrabold border transition-colors ${
-                    store.cameraAngleLocked
-                      ? 'bg-[#F59E0B] border-[#F59E0B] text-white'
-                      : 'bg-black/75 border-white/15 text-slate-200 hover:text-white'
-                  }`}
-                >
-                  {store.cameraAngleLocked ? <Lock size={11} /> : <Unlock size={11} />}
-                  <span>{store.cameraAngleLocked ? 'Angle Locked (L)' : 'Lock Angle (L)'}</span>
-                </button>
-              </>
-            )}
-          </div>
-
-          {/* Top-Right Quick Actions: Start from Scratch, Map & World / Land Dropdown */}
-          <div className="absolute top-3 right-3 flex items-center gap-1.5 z-20">
-            {envType === 'openWorld' && (
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setScratchMenuOpen((v) => !v);
-                    setLandMenuOpen(false);
-                  }}
-                  title="Start from a blank ocean world or reset the active land"
-                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-black/75 hover:bg-black/90 text-white text-[11px] font-bold border border-white/15"
-                >
-                  <RotateCcw size={12} className="text-[#F59E0B]" />
-                  <span>New</span>
-                </button>
-                {scratchMenuOpen && (
-                  <>
-                    <div
-                      className="fixed inset-0 z-20"
-                      onClick={() => setScratchMenuOpen(false)}
-                    />
-                    <div className="absolute right-0 mt-1.5 w-60 rounded-2xl bg-white dark:bg-[#171A23] shadow-2xl border border-slate-200/80 dark:border-white/[0.1] p-2 space-y-1.5 z-30">
-                      <div className="px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
-                        Start from Scratch
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          store.startWorldFromScratch('world');
-                          setScratchMenuOpen(false);
-                        }}
-                        className="w-full flex items-start gap-2 px-2.5 py-2 rounded-xl text-left hover:bg-rose-500/10 text-slate-800 dark:text-slate-100 transition-colors"
-                      >
-                        <Globe size={14} className="text-[#F2545B] shrink-0 mt-0.5" />
-                        <span>
-                          <span className="block text-xs font-extrabold text-[#F2545B]">
-                            Blank Ocean World
-                          </span>
-                          <span className="block text-[10px] text-slate-500 dark:text-[#949BB0]">
-                            Clear everything and paint landmasses from zero
-                          </span>
-                        </span>
-                      </button>
-                      {!isWorldMapScope && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            store.startWorldFromScratch('currentLand');
-                            setScratchMenuOpen(false);
-                          }}
-                          className="w-full flex items-start gap-2 px-2.5 py-2 rounded-xl text-left hover:bg-amber-500/10 text-slate-800 dark:text-slate-100 transition-colors"
-                        >
-                          <Eraser size={14} className="text-[#F59E0B] shrink-0 mt-0.5" />
-                          <span>
-                            <span className="block text-xs font-extrabold">
-                              Reset Current Land
-                            </span>
-                            <span className="block text-[10px] text-slate-500 dark:text-[#949BB0]">
-                              Flatten sculpting &amp; remove props in {currentLevel.name}
-                            </span>
-                          </span>
-                        </button>
-                      )}
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
-
-            <button
-              type="button"
-              onClick={() => setShowingMap(true)}
-              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-black/75 hover:bg-black/90 text-white text-[11px] font-bold border border-white/15"
-            >
-              <MapIcon size={12} className="text-[#7C5CFF]" />
-              <span>Map</span>
-            </button>
-
-            {envType === 'openWorld' && (
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setLandMenuOpen((v) => !v);
-                    setScratchMenuOpen(false);
-                  }}
-                  data-testid="world-scope-dropdown"
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-black/80 hover:bg-black/95 text-white text-[11px] font-extrabold border border-white/20"
-                  title="Switch between the World Map overview and any named Land / Level"
-                >
-                  {isWorldMapScope ? (
-                    <Globe size={12} style={{ color: WORLD_TERRAIN_YELLOW }} />
-                  ) : (
-                    <span
-                      className="w-2.5 h-2.5 rounded-full border border-white/40 shrink-0"
-                      style={{ backgroundColor: activeRegion?.colorHex ?? '#7C5CFF' }}
-                    />
-                  )}
-                  <span className="max-w-[120px] truncate">
-                    {isWorldMapScope ? 'World Map' : currentLevel.name}
-                  </span>
-                  <ChevronDown size={12} className="opacity-75" />
-                </button>
-
-                {landMenuOpen && (
-                  <>
-                    <div
-                      className="fixed inset-0 z-20"
-                      onClick={() => setLandMenuOpen(false)}
-                    />
-                    <div className="absolute right-0 mt-1.5 w-64 rounded-2xl bg-white dark:bg-[#171A23] shadow-2xl border border-slate-200/80 dark:border-white/[0.1] p-1.5 space-y-1 z-30">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          store.enterWorldEditorScope('worldMap');
-                          setLandMenuOpen(false);
-                        }}
-                        className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-xl text-left text-xs font-extrabold transition-colors ${
-                          isWorldMapScope
-                            ? 'bg-[#7C5CFF]/15 text-[#7C5CFF]'
-                            : 'hover:bg-slate-100 dark:hover:bg-[#1F2430] text-slate-800 dark:text-slate-100'
-                        }`}
-                      >
-                        <Globe size={13} style={{ color: WORLD_TERRAIN_YELLOW }} />
-                        <span className="flex-1 truncate">World Map (Overview)</span>
-                        {isWorldMapScope && <Check size={12} />}
-                      </button>
-
-                      <div className="my-1 border-t border-slate-200/70 dark:border-white/[0.08]" />
-                      <div className="px-2.5 py-0.5 text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
-                        Lands &amp; Levels ({wmRegions.length + extraNonRegionLevels.length})
-                      </div>
-
-                      {wmRegions.length === 0 && extraNonRegionLevels.length === 0 ? (
-                        <div className="px-2.5 py-2 text-[11px] text-slate-500 dark:text-[#949BB0]">
-                          Paint yellow terrain, then name your first Land below.
-                        </div>
-                      ) : (
-                        <div className="max-h-56 overflow-y-auto maker-scroll space-y-0.5">
-                          {wmRegions.map((reg) => {
-                            const active = !isWorldMapScope && currentLevel.id === reg.levelId;
-                            return (
-                              <button
-                                key={reg.id}
-                                type="button"
-                                onClick={() => {
-                                  store.enterWorldEditorScope(reg.levelId);
-                                  setLandMenuOpen(false);
-                                }}
-                                className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl text-left text-xs font-bold transition-colors ${
-                                  active
-                                    ? 'bg-[#7C5CFF]/15 text-[#7C5CFF]'
-                                    : 'hover:bg-slate-100 dark:hover:bg-[#1F2430] text-slate-700 dark:text-slate-200'
-                                }`}
-                              >
-                                <span
-                                  className="w-3 h-3 rounded-sm border border-black/20 shrink-0"
-                                  style={{ backgroundColor: reg.colorHex }}
-                                />
-                                <span className="flex-1 truncate">{reg.name}</span>
-                                {active && <Check size={12} />}
-                              </button>
-                            );
-                          })}
-                          {extraNonRegionLevels.map((lvl) => {
-                            const active = !isWorldMapScope && currentLevel.id === lvl.id;
-                            return (
-                              <button
-                                key={lvl.id}
-                                type="button"
-                                onClick={() => {
-                                  store.enterWorldEditorScope(lvl.id);
-                                  setLandMenuOpen(false);
-                                }}
-                                className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl text-left text-xs font-bold transition-colors ${
-                                  active
-                                    ? 'bg-[#7C5CFF]/15 text-[#7C5CFF]'
-                                    : 'hover:bg-slate-100 dark:hover:bg-[#1F2430] text-slate-700 dark:text-slate-200'
-                                }`}
-                              >
-                                <MapIcon size={12} className="text-slate-400 shrink-0" />
-                                <span className="flex-1 truncate">{lvl.name}</span>
-                                {active && <Check size={12} />}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
-
-                      <div className="pt-1 border-t border-slate-200/70 dark:border-white/[0.08] flex gap-1 px-1 pb-0.5">
-                        <input
-                          type="text"
-                          value={quickLandName}
-                          onChange={(e) => setQuickLandName(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              store.addWorldLandRegion(quickLandName.trim() || undefined);
-                              setQuickLandName('');
-                              setTool('terrain');
-                            }
-                          }}
-                          placeholder={`New Land ${wmRegions.length + 1}…`}
-                          className="flex-1 min-w-0 px-2 py-1 rounded-lg bg-slate-100 dark:bg-[#1F2430] text-xs font-semibold outline-none focus:ring-1 focus:ring-[#7C5CFF]"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => {
-                            store.addWorldLandRegion(quickLandName.trim() || undefined);
-                            setQuickLandName('');
-                            setTool('terrain');
-                          }}
-                          className="px-2 py-1 rounded-lg bg-[#7C5CFF] text-white text-[11px] font-extrabold shrink-0"
-                        >
-                          + Land
-                        </button>
-                      </div>
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
-          </div>
         </div>
 
         {/* Bottom Contextual World Job Dock */}
+        {(!isWorldMapScope || store.worldViewMode === '3d') && (
         <div className="shrink-0 space-y-1.5">
           {isWorldMapScope ? (
             store.worldViewMode === '3d' ? (
@@ -2363,30 +2402,6 @@ export const WorldStage: React.FC<{ store: MakerStore }> = ({ store }) => {
                   </div>
                 </div>
               </div>
-            ) : !showLeftPanel ? (
-              <div className="flex items-center justify-between gap-2 px-3 py-1.5 rounded-xl bg-white dark:bg-[#171A23] border border-slate-200/80 dark:border-white/[0.08]">
-                <div className="inline-flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => setLeftPanel('level')}
-                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-extrabold bg-[#7C5CFF]/15 text-[#7C5CFF]"
-                  >
-                    <PanelLeftOpen size={12} />
-                    <span>Contents</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setLeftPanel('assets')}
-                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-extrabold text-slate-600 dark:text-[#C8D0E4] hover:text-[#7C5CFF]"
-                  >
-                    <Shapes size={12} />
-                    <span>Assets ({store.customAssets.length})</span>
-                  </button>
-                </div>
-                <span className="text-[11px] font-semibold text-slate-500 dark:text-[#949BB0]">
-                  World Map Overview · Paint Terrain &amp; color-coded Lands above
-                </span>
-              </div>
             ) : null
           ) : (
             <div className="flex flex-wrap items-center justify-between gap-1.5">
@@ -2502,9 +2517,11 @@ export const WorldStage: React.FC<{ store: MakerStore }> = ({ store }) => {
             </div>
           )}
 
-          {/* Contextual Building Kit Tray */}
-          {!isWorldMapScope && (store.activeWorldDomain === 'buildings' ||
-            (activeTool === 'add' && addPaletteMode === 'blocks' && !activePlaceFxTemplate)) && (
+          {/* Contextual Building Kit Tray (3D Land Edit mode only) */}
+          {!isWorldMapScope &&
+            store.worldViewMode === '3d' &&
+            (store.activeWorldDomain === 'buildings' ||
+              (activeTool === 'add' && addPaletteMode === 'blocks' && !activePlaceFxTemplate)) && (
             <div className="rounded-2xl bg-white dark:bg-[#171A23] border border-slate-200/80 dark:border-white/[0.08] p-2 space-y-1.5">
               <div className="flex flex-wrap items-center justify-between gap-1.5">
                 <div className="flex flex-wrap items-center gap-1">
@@ -2670,6 +2687,7 @@ export const WorldStage: React.FC<{ store: MakerStore }> = ({ store }) => {
             />
           )}
         </div>
+        )}
       </main>
 
       {/* Right Contextual World Domain / Entity Inspector */}

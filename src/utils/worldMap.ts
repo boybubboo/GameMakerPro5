@@ -10,6 +10,7 @@ import {
   createDefaultDirtAndRoadConfig,
   createDefaultMountainConfig,
   createInitialTerrain,
+  getTerrainRadius,
   uid,
 } from './terrain';
 
@@ -55,7 +56,7 @@ export function clampRegionOrigin(
   z: number,
   worldRadius = WORLD_MAP_RADIUS
 ): [number, number] {
-  const maxOffset = Math.max(0, worldRadius - IslandTerrain.radius);
+  const maxOffset = Math.max(0, worldRadius - 24);
   return [
     Math.round(Math.max(-maxOffset, Math.min(maxOffset, x))),
     Math.round(Math.max(-maxOffset, Math.min(maxOffset, z))),
@@ -239,44 +240,162 @@ export function ensureWorldMapForProject(project: GameProject): WorldMapData {
   };
 }
 
+export interface WorldMapSample {
+  land: number;
+  regionCode: number;
+  isBorder: boolean;
+}
+
+export interface CompactStoredWorldMapData extends Omit<WorldMapData, 'landMask' | 'regionGrid'> {
+  landMask?: number[];
+  regionGrid?: number[];
+  landMaskRle?: number[];
+  regionGridRle?: number[];
+}
+
+export function encodeNumberArrayRle(arr: readonly number[]): number[] {
+  const len = arr.length;
+  if (len === 0) return [];
+  const out: number[] = [];
+  let cur = arr[0] ?? 0;
+  let count = 1;
+  for (let i = 1; i < len; i++) {
+    const v = arr[i] ?? 0;
+    if (v === cur) {
+      count++;
+    } else {
+      out.push(cur, count);
+      cur = v;
+      count = 1;
+    }
+  }
+  out.push(cur, count);
+  return out;
+}
+
+export function decodeNumberArrayRle(
+  rle: readonly number[],
+  expectedLength?: number
+): number[] {
+  let total = 0;
+  for (let i = 1; i < rle.length; i += 2) {
+    const cnt = rle[i];
+    if (cnt > 0) total += cnt;
+  }
+  const len = expectedLength && expectedLength > 0 ? expectedLength : total;
+  const out = new Array<number>(len).fill(0);
+  let ptr = 0;
+  for (let i = 0; i + 1 < rle.length && ptr < len; i += 2) {
+    const val = rle[i] ?? 0;
+    const cnt = rle[i + 1] ?? 0;
+    const end = Math.min(len, ptr + Math.max(0, cnt));
+    for (; ptr < end; ptr++) {
+      out[ptr] = val;
+    }
+  }
+  return out;
+}
+
+export function compactWorldMapForStorage(worldMap: WorldMapData): CompactStoredWorldMapData {
+  return {
+    gridSize: worldMap.gridSize,
+    worldRadius: worldMap.worldRadius,
+    regions: worldMap.regions,
+    revision: worldMap.revision,
+    landMaskRle: encodeNumberArrayRle(worldMap.landMask),
+    regionGridRle: encodeNumberArrayRle(worldMap.regionGrid),
+  };
+}
+
+export function hydrateWorldMapFromStorage(
+  raw: CompactStoredWorldMapData | WorldMapData | undefined
+): WorldMapData | undefined {
+  if (!raw) return undefined;
+  const gridSize = raw.gridSize ?? WORLD_MAP_GRID_SIZE;
+  const expectedLen = (gridSize + 1) * (gridSize + 1);
+  const compact = raw as CompactStoredWorldMapData;
+  const landMask = Array.isArray(compact.landMaskRle)
+    ? decodeNumberArrayRle(compact.landMaskRle, expectedLen)
+    : Array.isArray(compact.landMask)
+    ? compact.landMask
+    : [];
+  const regionGrid = Array.isArray(compact.regionGridRle)
+    ? decodeNumberArrayRle(compact.regionGridRle, expectedLen)
+    : Array.isArray(compact.regionGrid)
+    ? compact.regionGrid
+    : [];
+  return {
+    gridSize,
+    worldRadius: raw.worldRadius,
+    landMask,
+    regionGrid,
+    regions: raw.regions ?? [],
+    revision: raw.revision ?? 1,
+  };
+}
+
+export function sampleWorldMapInto(
+  worldMap: WorldMapData | undefined,
+  x: number,
+  z: number,
+  out: WorldMapSample
+): WorldMapSample {
+  if (!worldMap || worldMap.landMask.length === 0) {
+    out.land = 0;
+    out.regionCode = 0;
+    out.isBorder = false;
+    return out;
+  }
+  const r = worldMap.worldRadius && worldMap.worldRadius > 0 ? worldMap.worldRadius : WORLD_MAP_RADIUS;
+  if (x < -r || x > r || z < -r || z > r) {
+    out.land = 0;
+    out.regionCode = 0;
+    out.isBorder = false;
+    return out;
+  }
+  const size = worldMap.gridSize;
+  const width = size + 1;
+  const invTwoR = size / (2 * r);
+  const col = Math.max(0, Math.min(size, Math.round((x + r) * invTwoR)));
+  const row = Math.max(0, Math.min(size, Math.round((z + r) * invTwoR)));
+  const idx = row * width + col;
+  const landMask = worldMap.landMask;
+  const regionGrid = worldMap.regionGrid;
+  const land = landMask[idx] ?? 0;
+  const regionCode = regionGrid[idx] ?? 0;
+
+  let isBorder = false;
+  if (land === 1) {
+    if (row > 0) {
+      const ni = idx - width;
+      if (landMask[ni] === 0 || regionGrid[ni] !== regionCode) isBorder = true;
+    }
+    if (!isBorder && row < size) {
+      const ni = idx + width;
+      if (landMask[ni] === 0 || regionGrid[ni] !== regionCode) isBorder = true;
+    }
+    if (!isBorder && col > 0) {
+      const ni = idx - 1;
+      if (landMask[ni] === 0 || regionGrid[ni] !== regionCode) isBorder = true;
+    }
+    if (!isBorder && col < size) {
+      const ni = idx + 1;
+      if (landMask[ni] === 0 || regionGrid[ni] !== regionCode) isBorder = true;
+    }
+  }
+
+  out.land = land;
+  out.regionCode = regionCode;
+  out.isBorder = isBorder;
+  return out;
+}
+
 export function sampleWorldMapAtWorld(
   worldMap: WorldMapData | undefined,
   x: number,
   z: number
-): { land: number; regionCode: number; isBorder: boolean } {
-  if (!worldMap || worldMap.landMask.length === 0) {
-    return { land: 0, regionCode: 0, isBorder: false };
-  }
-  const r = getWorldMapRadius(worldMap);
-  if (x < -r || x > r || z < -r || z > r) {
-    return { land: 0, regionCode: 0, isBorder: false };
-  }
-  const size = worldMap.gridSize;
-  const width = size + 1;
-  const col = Math.max(0, Math.min(size, Math.round(((x + r) / (2 * r)) * size)));
-  const row = Math.max(0, Math.min(size, Math.round(((z + r) / (2 * r)) * size)));
-  const idx = row * width + col;
-  const land = worldMap.landMask[idx] ?? 0;
-  const regionCode = worldMap.regionGrid[idx] ?? 0;
-
-  let isBorder = false;
-  if (land === 1) {
-    const neighbors = [
-      row > 0 ? (row - 1) * width + col : -1,
-      row < size ? (row + 1) * width + col : -1,
-      col > 0 ? row * width + (col - 1) : -1,
-      col < size ? row * width + (col + 1) : -1,
-    ];
-    for (const ni of neighbors) {
-      if (ni < 0) continue;
-      if (worldMap.landMask[ni] === 0 || worldMap.regionGrid[ni] !== regionCode) {
-        isBorder = true;
-        break;
-      }
-    }
-  }
-
-  return { land, regionCode, isBorder };
+): WorldMapSample {
+  return sampleWorldMapInto(worldMap, x, z, { land: 0, regionCode: 0, isBorder: false });
 }
 
 export function sampleWorldMapForLand(
@@ -304,59 +423,72 @@ export function applyWorldMapStroke(
   const worldRadius = getWorldMapRadius(worldMap);
   const step = (2 * worldRadius) / size;
   const r = Math.max(2, radius);
+  const rSq = r * r;
 
   const minCol = Math.max(1, Math.floor(((x - r + worldRadius) / (2 * worldRadius)) * size) - 1);
   const maxCol = Math.min(size - 1, Math.ceil(((x + r + worldRadius) / (2 * worldRadius)) * size) + 1);
   const minRow = Math.max(1, Math.floor(((z - r + worldRadius) / (2 * worldRadius)) * size) - 1);
   const maxRow = Math.min(size - 1, Math.ceil(((z + r + worldRadius) / (2 * worldRadius)) * size) + 1);
 
-  const landMask = [...worldMap.landMask];
-  const regionGrid = [...worldMap.regionGrid];
-  let changed = false;
+  const srcLand = worldMap.landMask;
+  const srcRegion = worldMap.regionGrid;
+  let landMask: number[] | null = null;
+  let regionGrid: number[] | null = null;
+
+  const ensureCopy = () => {
+    if (!landMask) landMask = srcLand.slice();
+    if (!regionGrid) regionGrid = srcRegion.slice();
+  };
 
   for (let row = minRow; row <= maxRow; row++) {
     const vz = -worldRadius + row * step;
+    const dz = vz - z;
+    const dzSq = dz * dz;
+    if (dzSq > rSq) continue;
+    const rowOff = row * width;
+
     for (let col = minCol; col <= maxCol; col++) {
       const vx = -worldRadius + col * step;
-      if (Math.hypot(vx - x, vz - z) > r) continue;
-      const idx = row * width + col;
+      const dx = vx - x;
+      if (dx * dx + dzSq > rSq) continue;
+      const idx = rowOff + col;
+      const curLand = (landMask ?? srcLand)[idx];
+      const curReg = (regionGrid ?? srcRegion)[idx];
 
       if (mode === 'terrain') {
-        if (landMask[idx] !== 1) {
-          landMask[idx] = 1;
-          changed = true;
-        }
-        if (regionCode && regionCode > 0 && regionGrid[idx] !== regionCode) {
-          regionGrid[idx] = regionCode;
-          changed = true;
+        const needLand = curLand !== 1;
+        const needReg = Boolean(regionCode && regionCode > 0 && curReg !== regionCode);
+        if (needLand || needReg) {
+          ensureCopy();
+          if (needLand) landMask![idx] = 1;
+          if (needReg) regionGrid![idx] = regionCode!;
         }
       } else if (mode === 'eraseTerrain') {
-        if (landMask[idx] !== 0 || regionGrid[idx] !== 0) {
-          landMask[idx] = 0;
-          regionGrid[idx] = 0;
-          changed = true;
+        if (curLand !== 0 || curReg !== 0) {
+          ensureCopy();
+          landMask![idx] = 0;
+          regionGrid![idx] = 0;
         }
       } else if (mode === 'paintLand' && regionCode && regionCode > 0) {
-        if (landMask[idx] === 1 || autoFillOcean) {
-          if (landMask[idx] !== 1) {
-            landMask[idx] = 1;
-            changed = true;
-          }
-          if (regionGrid[idx] !== regionCode) {
-            regionGrid[idx] = regionCode;
-            changed = true;
+        if (curLand === 1 || autoFillOcean) {
+          const needLand = curLand !== 1;
+          const needReg = curReg !== regionCode;
+          if (needLand || needReg) {
+            ensureCopy();
+            if (needLand) landMask![idx] = 1;
+            if (needReg) regionGrid![idx] = regionCode;
           }
         }
       } else if (mode === 'clearLand') {
-        if (regionGrid[idx] !== 0) {
-          regionGrid[idx] = 0;
-          changed = true;
+        if (curReg !== 0) {
+          ensureCopy();
+          regionGrid![idx] = 0;
         }
       }
     }
   }
 
-  if (!changed) return worldMap;
+  if (!landMask || !regionGrid) return worldMap;
 
   return {
     ...worldMap,
@@ -366,22 +498,123 @@ export function applyWorldMapStroke(
   };
 }
 
+export function computeRegionWindowRadius(
+  worldMap: WorldMapData,
+  activeRegionCode?: number,
+  regionOrigin?: [number, number]
+): number {
+  if (!activeRegionCode || activeRegionCode <= 0) {
+    return IslandTerrain.radius;
+  }
+  const bounds = computeRegionBounds(worldMap, activeRegionCode);
+  if (!bounds || bounds.cellCount === 0) {
+    return IslandTerrain.radius;
+  }
+  const ox = regionOrigin?.[0] ?? bounds.centerX;
+  const oz = regionOrigin?.[1] ?? bounds.centerZ;
+  const halfExtent = Math.max(
+    Math.abs(bounds.maxX - ox),
+    Math.abs(bounds.minX - ox),
+    Math.abs(bounds.maxZ - oz),
+    Math.abs(bounds.minZ - oz)
+  );
+  const maxAllowed = getWorldMapRadius(worldMap);
+  const rounded = Math.ceil((halfExtent + 16) / 10) * 10;
+  return Math.max(IslandTerrain.radius, Math.min(maxAllowed, rounded));
+}
+
+export function hasManualTerrainEdits(terrain?: TerrainData | null): boolean {
+  if (!terrain) return false;
+  if (
+    terrain.scatter.length > 0 ||
+    (terrain.caves?.length ?? 0) > 0 ||
+    (terrain.roads?.length ?? 0) > 0 ||
+    (terrain.waterBodies?.length ?? 0) > 0
+  ) {
+    return true;
+  }
+  for (let i = 0; i < terrain.heights.length; i++) {
+    if (terrain.heights[i] > IslandTerrain.baseTop + 0.35) return true;
+  }
+  for (let i = 0; i < terrain.layers.length; i++) {
+    if ((terrain.layers[i] ?? 0) >= 2) return true;
+  }
+  return false;
+}
+
 export function syncLevelTerrainWithWorldMap(
   rawTerrain: TerrainData | undefined,
   worldMap: WorldMapData,
   activeRegionCode?: number,
   regionOrigin?: [number, number]
 ): TerrainData {
-  const base =
-    rawTerrain && rawTerrain.size === IslandTerrain.gridSize
-      ? rawTerrain
-      : createScratchOceanTerrain();
+  const localRadius = computeRegionWindowRadius(worldMap, activeRegionCode, regionOrigin);
+  const oldRadius = getTerrainRadius(rawTerrain);
+  const scaleChanged = Math.abs(oldRadius - localRadius) > 0.5;
+  const hasValidRaw = Boolean(rawTerrain && rawTerrain.size === IslandTerrain.gridSize);
+
+  let base: TerrainData;
+  let heights: number[];
+  let layers: number[];
+  let weathering: number[] | undefined;
+
+  if (!hasValidRaw) {
+    base = createScratchOceanTerrain();
+    heights = [...base.heights];
+    layers = [...base.layers];
+    weathering = base.weathering;
+  } else if (scaleChanged) {
+    if (hasManualTerrainEdits(rawTerrain)) {
+      base = rawTerrain!;
+      const size = base.size;
+      const width = size + 1;
+      const localStep = (2 * localRadius) / size;
+      heights = new Array<number>(width * width).fill(IslandTerrain.seaFloor);
+      layers = new Array<number>(width * width).fill(1);
+      weathering = base.weathering ? new Array<number>(width * width).fill(0) : undefined;
+      for (let row = 0; row <= size; row++) {
+        const vz = -localRadius + row * localStep;
+        if (Math.abs(vz) > oldRadius) continue;
+        const srcRow = Math.max(
+          0,
+          Math.min(size, Math.round(((vz + oldRadius) / (2 * oldRadius)) * size))
+        );
+        for (let col = 0; col <= size; col++) {
+          const vx = -localRadius + col * localStep;
+          if (Math.abs(vx) > oldRadius) continue;
+          const srcCol = Math.max(
+            0,
+            Math.min(size, Math.round(((vx + oldRadius) / (2 * oldRadius)) * size))
+          );
+          const dstIdx = row * width + col;
+          const srcIdx = srcRow * width + srcCol;
+          heights[dstIdx] = base.heights[srcIdx];
+          layers[dstIdx] = base.layers[srcIdx];
+          if (weathering && base.weathering) {
+            weathering[dstIdx] = base.weathering[srcIdx];
+          }
+        }
+      }
+    } else {
+      const fresh = createScratchOceanTerrain();
+      base = {
+        ...fresh,
+        mountainConfig: rawTerrain?.mountainConfig ?? fresh.mountainConfig,
+        dirtAndRoadConfig: rawTerrain?.dirtAndRoadConfig ?? fresh.dirtAndRoadConfig,
+      };
+      heights = [...base.heights];
+      layers = [...base.layers];
+      weathering = base.weathering;
+    }
+  } else {
+    base = rawTerrain!;
+    heights = [...base.heights];
+    layers = [...base.layers];
+    weathering = base.weathering;
+  }
+
   const size = base.size;
   const width = size + 1;
-  const heights = [...base.heights];
-  const layers = [...base.layers];
-
-  const localRadius = IslandTerrain.radius;
   const localStep = (2 * localRadius) / size;
   const ox = regionOrigin?.[0] ?? 0;
   const oz = regionOrigin?.[1] ?? 0;
@@ -389,14 +622,16 @@ export function syncLevelTerrainWithWorldMap(
   // Sample the 4x WorldMap window centered at [ox, oz] onto this Land's local grid
   const localLandMask = new Uint8Array(width * width);
   const localRegionGrid = new Uint16Array(width * width);
+  const wmSample: WorldMapSample = { land: 0, regionCode: 0, isBorder: false };
   for (let row = 0; row <= size; row++) {
     const wz = oz + (-localRadius + row * localStep);
+    const rowOff = row * width;
     for (let col = 0; col <= size; col++) {
       const wx = ox + (-localRadius + col * localStep);
-      const s = sampleWorldMapAtWorld(worldMap, wx, wz);
-      const idx = row * width + col;
-      localLandMask[idx] = s.land;
-      localRegionGrid[idx] = s.regionCode;
+      sampleWorldMapInto(worldMap, wx, wz, wmSample);
+      const idx = rowOff + col;
+      localLandMask[idx] = wmSample.land;
+      localRegionGrid[idx] = wmSample.regionCode;
     }
   }
 
@@ -447,6 +682,12 @@ export function syncLevelTerrainWithWorldMap(
         if (heights[idx] < IslandTerrain.waterLevel - 0.15) {
           heights[idx] = isCoast ? 0.3 : IslandTerrain.baseTop;
           layers[idx] = isCoast ? 1 : 0;
+        } else if (!isCoast && Math.abs(heights[idx] - 0.3) < 0.05 && layers[idx] === 1) {
+          heights[idx] = IslandTerrain.baseTop;
+          layers[idx] = 0;
+        } else if (isCoast && Math.abs(heights[idx] - IslandTerrain.baseTop) < 0.05 && layers[idx] === 0) {
+          heights[idx] = 0.3;
+          layers[idx] = 1;
         }
       }
     }
@@ -456,8 +697,73 @@ export function syncLevelTerrainWithWorldMap(
     ...base,
     heights,
     layers,
+    weathering,
+    waterBodies: base.waterBodies ?? [],
     freeformWorld: true,
+    worldRadius: localRadius,
     revision: (base.revision ?? 1) + 1,
+  };
+}
+
+export interface RegionBoundsResult {
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
+  centerX: number;
+  centerZ: number;
+  centroidX: number;
+  centroidZ: number;
+  cellCount: number;
+}
+
+export function computeRegionBounds(
+  worldMap: WorldMapData,
+  regionCode: number
+): RegionBoundsResult | null {
+  if (!regionCode || regionCode <= 0) return null;
+  const size = worldMap.gridSize;
+  const width = size + 1;
+  const r = getWorldMapRadius(worldMap);
+  const step = (2 * r) / size;
+
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+  let sx = 0;
+  let sz = 0;
+  let count = 0;
+
+  for (let row = 0; row <= size; row++) {
+    const vz = -r + row * step;
+    const rowOff = row * width;
+    for (let col = 0; col <= size; col++) {
+      const idx = rowOff + col;
+      if (worldMap.landMask[idx] !== 1) continue;
+      if ((worldMap.regionGrid[idx] ?? 0) !== regionCode) continue;
+      const vx = -r + col * step;
+      if (vx < minX) minX = vx;
+      if (vx > maxX) maxX = vx;
+      if (vz < minZ) minZ = vz;
+      if (vz > maxZ) maxZ = vz;
+      sx += vx;
+      sz += vz;
+      count += 1;
+    }
+  }
+
+  if (count === 0) return null;
+  return {
+    minX,
+    maxX,
+    minZ,
+    maxZ,
+    centerX: (minX + maxX) * 0.5,
+    centerZ: (minZ + maxZ) * 0.5,
+    centroidX: sx / count,
+    centroidZ: sz / count,
+    cellCount: count,
   };
 }
 

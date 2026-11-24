@@ -1600,6 +1600,7 @@ export const WorldDomainInspector: React.FC<WorldDomainInspectorProps> = ({
   // --- DOMAIN: SELECT / ENTITY OR BUILDINGS ---
   const showBuildingPlacementInspector =
     !currentEntity &&
+    store.worldViewMode === '3d' &&
     (domain === 'buildings' || (activeTool === 'add' && addPaletteMode === 'blocks'));
 
   return (
