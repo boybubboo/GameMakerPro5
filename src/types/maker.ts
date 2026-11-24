@@ -316,6 +316,8 @@ export interface ObjectSurfaceFinish {
   color: string;
   roughness: number;
   metalness: number;
+  emissive?: string;
+  emissiveIntensity?: number;
   weathering?: WeatheringPreset;
   weatheringIntensity?: number;
 }
@@ -622,7 +624,8 @@ export type PropPresetId =
   | 'campfire'
   | 'craftingBench'
   | 'ramp'
-  | 'checkpointArch';
+  | 'checkpointArch'
+  | 'savePlinth';
 
 export type CarPresetId =
   | 'trailBuggy'
@@ -1761,6 +1764,8 @@ export interface PlayerTelemetry {
   levelId: string;
   point: BoardPoint;
   yaw: number;
+  worldX?: number;
+  worldZ?: number;
   speedKmh?: number;
   buddiesFound?: number;
   buddiesTotal?: number;
@@ -1899,6 +1904,8 @@ export interface GameProject {
   updatedAt: string; // ISO
   levels: GameLevel[];
   worldMap?: WorldMapData;
+  worldMapFogOfWar?: boolean;
+  savePlinthAssetId?: string;
   heroName: string;
   heroBody: string;
   heroColors: {

@@ -66,7 +66,11 @@ import { computeCurveLength } from '../../three/curveGuide';
 import { renderObject3DThumbnail } from '../../three/gltfAssetManager';
 import { disposeObject3D } from '../../three/islandScene';
 import { WEATHERING_PRESETS } from '../../three/nodeMaterialUtils';
-import { exportObjectGroupToGlbBuffer } from '../../three/objectMakerBuilder';
+import {
+  buildAndExportObjectDocToGlb,
+  createSavePlinthObjectDoc,
+  exportObjectGroupToGlbBuffer,
+} from '../../three/objectMakerBuilder';
 import { resolveGrassConfig } from '../../three/stylizedGrassSystem';
 import { applyVertexPaintStrokesToObject } from '../../three/vertexPainter';
 import {
@@ -88,6 +92,7 @@ import {
   WORLD_TERRAIN_YELLOW,
   type WorldMapBrushMode,
 } from '../../utils/worldMap';
+import { isSavePlinthEntity } from '../../utils/worldMapFog';
 import { AssetThumbnail } from '../shared/AssetThumbnail';
 import { CanopyTreeInspector } from '../shared/CanopyTreeInspector';
 import { FxEmitterInspector } from '../shared/FxEmitterInspector';
@@ -191,7 +196,7 @@ export const WorldDomainInspector: React.FC<WorldDomainInspectorProps> = ({
   onSaveEntityToFxLibrary,
   onAddVistaItem,
 }) => {
-  const { currentLevel, currentEntity } = store;
+  const { currentLevel, currentEntity, currentProject } = store;
   const [savingBuildingAsset, setSavingBuildingAsset] = useState(false);
   const [savedBuildingAssetNote, setSavedBuildingAssetNote] = useState<string | null>(null);
   const [newLandName, setNewLandName] = useState('');
@@ -202,7 +207,7 @@ export const WorldDomainInspector: React.FC<WorldDomainInspectorProps> = ({
     [currentLevel?.terrain]
   );
 
-  if (!currentLevel) return null;
+  if (!currentLevel || !currentProject) return null;
   const envType = getEnvironmentType(currentLevel);
 
   // --- WORLD MAP OVERVIEW INSPECTOR ---
@@ -229,6 +234,41 @@ export const WorldDomainInspector: React.FC<WorldDomainInspectorProps> = ({
       if (created) {
         setTool('terrain');
       }
+    };
+
+    const handleCustomizePlinthInEditor = async (targetEntity?: LevelEntity) => {
+      const existingId = targetEntity?.customAssetId ?? currentProject.savePlinthAssetId;
+      const existingMeta = existingId
+        ? store.customAssets.find((a) => a.id === existingId && Boolean(a.objectRecipe))
+        : undefined;
+      if (existingMeta) {
+        store.openObjectMaker(existingMeta.id);
+        return;
+      }
+      const doc = createSavePlinthObjectDoc();
+      const { buffer, root } = await buildAndExportObjectDocToGlb(doc);
+      disposeObject3D(root);
+      const saved = await store.saveGeneratedAsset({
+        name: 'Save / Spawn Plinth',
+        category: 'prop',
+        buffer,
+        objectRecipe: doc,
+        keepMetricScale: true,
+      });
+      store.updateProject(
+        'link custom save plinth asset',
+        (proj) => ({ ...proj, savePlinthAssetId: saved.id }),
+        false
+      );
+      if (targetEntity) {
+        store.updateEntity(
+          targetEntity.id,
+          'assign custom save plinth',
+          (ent) => ({ ...ent, propPreset: 'savePlinth', customAssetId: saved.id }),
+          false
+        );
+      }
+      store.openObjectMaker(saved.id);
     };
 
     return (
@@ -310,6 +350,40 @@ export const WorldDomainInspector: React.FC<WorldDomainInspectorProps> = ({
               className="w-full accent-[#7C5CFF]"
             />
           </div>
+        </div>
+
+        {/* In-Game World Map & Save Plinth Options */}
+        <div className="p-3 rounded-2xl bg-slate-100 dark:bg-[#1F2430] space-y-2.5">
+          <FieldLabel text="In-Game Map &amp; Fast Travel" />
+          <label className="flex items-start justify-between gap-2.5 text-[11px] font-semibold cursor-pointer">
+            <span className="min-w-0">
+              <span className="block font-bold text-slate-800 dark:text-slate-100">
+                Fog of War (Hide Untravelled Areas)
+              </span>
+              <span className="block text-[10px] text-slate-500 dark:text-[#949BB0] mt-0.5">
+                When ON, only visited areas show in color on both minimap and M World Map.
+              </span>
+            </span>
+            <input
+              type="checkbox"
+              checked={Boolean(currentProject.worldMapFogOfWar)}
+              onChange={(e) =>
+                store.updateProject('toggle map fog of war', (proj) => ({
+                  ...proj,
+                  worldMapFogOfWar: e.target.checked,
+                }))
+              }
+              className="accent-[#38BDF8] w-4 h-4 mt-0.5 shrink-0"
+            />
+          </label>
+          <button
+            type="button"
+            onClick={() => void handleCustomizePlinthInEditor()}
+            className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-[#0EA5E9]/15 hover:bg-[#0EA5E9]/25 text-[#0284C7] dark:text-[#38BDF8] text-[11px] font-extrabold transition-colors"
+          >
+            <Shapes size={13} />
+            <span>Customize Save Plinth Look</span>
+          </button>
         </div>
 
         {/* Named Lands / Levels */}
@@ -2133,7 +2207,7 @@ export const WorldDomainInspector: React.FC<WorldDomainInspectorProps> = ({
           })()}
 
           {(currentEntity.kind === 'prop' || currentEntity.kind === 'checkpoint') && (
-            <div className="p-2.5 rounded-xl bg-slate-100 dark:bg-[#1F2430]">
+            <div className="p-2.5 rounded-xl bg-slate-100 dark:bg-[#1F2430] space-y-2">
               <select
                 value={currentEntity.propPreset ?? ''}
                 onChange={(e) =>
@@ -2145,6 +2219,7 @@ export const WorldDomainInspector: React.FC<WorldDomainInspectorProps> = ({
                 className="w-full px-2.5 py-1.5 rounded-lg bg-white dark:bg-[#171A23] text-xs font-semibold"
               >
                 <option value="">Standard Prop</option>
+                <option value="savePlinth">Save / Spawn Plinth (Blue Glow)</option>
                 <option value="tavern">Woodland Tavern</option>
                 <option value="cottage">Burrow Cottage</option>
                 <option value="dock">Lakeside Dock</option>
@@ -2154,6 +2229,75 @@ export const WorldDomainInspector: React.FC<WorldDomainInspectorProps> = ({
                 <option value="ramp">Timber Stunt Ramp</option>
                 <option value="checkpointArch">Rally Checkpoint Arch</option>
               </select>
+
+              {isSavePlinthEntity(currentEntity) && (
+                <div className="p-2.5 rounded-xl bg-[#0EA5E9]/10 border border-[#38BDF8]/30 space-y-2">
+                  <div className="text-[11px] font-extrabold text-[#0284C7] dark:text-[#38BDF8]">
+                    Save / Spawn Plinth
+                  </div>
+                  <p className="text-[10px] text-slate-600 dark:text-[#949BB0] leading-snug">
+                    Touching this plinth in Play mode saves progress and opens the World Map to fast-travel to any discovered plinth.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const existingId =
+                        currentEntity.customAssetId ?? store.currentProject?.savePlinthAssetId;
+                      const existingMeta = existingId
+                        ? store.customAssets.find(
+                            (a) => a.id === existingId && Boolean(a.objectRecipe)
+                          )
+                        : undefined;
+                      if (existingMeta) {
+                        if (!currentEntity.customAssetId) {
+                          store.updateEntity(
+                            currentEntity.id,
+                            'link custom save plinth',
+                            (ent) => ({
+                              ...ent,
+                              propPreset: 'savePlinth',
+                              customAssetId: existingMeta.id,
+                            }),
+                            false
+                          );
+                        }
+                        store.openObjectMaker(existingMeta.id);
+                        return;
+                      }
+                      const doc = createSavePlinthObjectDoc();
+                      const { buffer, root } = await buildAndExportObjectDocToGlb(doc);
+                      disposeObject3D(root);
+                      const saved = await store.saveGeneratedAsset({
+                        name: 'Save / Spawn Plinth',
+                        category: 'prop',
+                        buffer,
+                        objectRecipe: doc,
+                        keepMetricScale: true,
+                      });
+                      store.updateProject(
+                        'link project save plinth asset',
+                        (proj) => ({ ...proj, savePlinthAssetId: saved.id }),
+                        false
+                      );
+                      store.updateEntity(
+                        currentEntity.id,
+                        'link entity save plinth asset',
+                        (ent) => ({
+                          ...ent,
+                          propPreset: 'savePlinth',
+                          customAssetId: saved.id,
+                        }),
+                        false
+                      );
+                      store.openObjectMaker(saved.id);
+                    }}
+                    className="w-full inline-flex items-center justify-center gap-1.5 px-2.5 py-2 rounded-lg bg-[#0EA5E9] hover:bg-[#0284C7] text-white text-[11px] font-extrabold transition-colors"
+                  >
+                    <Shapes size={13} />
+                    <span>Modify Plinth in Object Editor</span>
+                  </button>
+                </div>
+              )}
             </div>
           )}
 

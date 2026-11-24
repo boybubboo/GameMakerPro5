@@ -13,6 +13,7 @@ import {
   Fish,
   Flame,
   Gauge,
+  Map as MapIcon,
   MessageCircle,
   PanelBottom,
   Pause,
@@ -102,6 +103,29 @@ import {
 } from '../../utils/terrain';
 import { readJsHeapUsageMB } from '../../utils/resourceMonitor';
 import {
+  clearDiscoveredPlinths,
+  clearSavedPlayProgress,
+  consumePendingPlinthTravel,
+  encodeExplorationBase64,
+  getDiscoveredPlinthKeys,
+  getEffectiveMapInfo,
+  getExplorationSnapshot,
+  hydrateDiscoveredPlinths,
+  hydrateExploration,
+  isSavePlinthEntity,
+  levelLocalToMapCoords,
+  loadSavedPlayProgress,
+  makePlinthKey,
+  markPlinthDiscovered,
+  resetExploration,
+  revealExplorationAtCoords,
+  savePlayProgress,
+  setPendingPlinthTravel,
+  subscribeOpenInGameWorldMap,
+  type SavePlinthTarget,
+  type SavedPlayProgress,
+} from '../../utils/worldMapFog';
+import {
   applyVisualStyleToObject,
   instantiateCustomModel,
   loadCustomAssetToCache,
@@ -174,6 +198,7 @@ import { InventoryItemIcon } from '../shared/InventoryItemIcon';
 import { IconBadge, Pill } from '../shared/MakerUI';
 import { computeWidgetPosition } from '../stages/InterfaceStage';
 import { InventoryModal } from './InventoryModal';
+import { InGameWorldMapModal } from './InGameWorldMapModal';
 import {
   StorybookChapterBanner,
   StorybookCoverModal,
@@ -549,6 +574,56 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
   const [chapterBannerVisible, setChapterBannerVisible] = useState(false);
   const introSpokenRef = useRef(false);
 
+  const [worldMapOpen, setWorldMapOpen] = useState(false);
+  const [fastTravelState, setFastTravelState] = useState<{
+    plinthEntityId: string;
+    plinthName: string;
+  } | null>(null);
+  const [discoveredPlinthKeys, setDiscoveredPlinthKeys] = useState<Set<string>>(() =>
+    currentProject ? getDiscoveredPlinthKeys(currentProject.id) : new Set()
+  );
+  const liveHeroTransformRef = useRef({ x: 0, z: 0, yaw: 0 });
+  const resumeSavedRef = useRef<SavedPlayProgress | null>(null);
+  const crossLevelCarryRef = useRef<{
+    coins: number;
+    keys: number;
+    health: number;
+    maxHealth: number;
+  } | null>(null);
+  const sameLevelTravelFnRef = useRef<((target: SavePlinthTarget) => void) | null>(null);
+  const liveStatsGetterRef = useRef<
+    (() => { coins: number; keys: number; health: number; maxHealth: number }) | null
+  >(null);
+  const openFastTravelRef = useRef<(plinthEntityId: string, plinthName: string) => void>(() => {});
+  const worldMapOpenRef = useRef(worldMapOpen);
+  worldMapOpenRef.current = worldMapOpen;
+  const fastTravelStateRef = useRef(fastTravelState);
+  fastTravelStateRef.current = fastTravelState;
+  const showTitleRef = useRef(showTitle);
+  showTitleRef.current = showTitle;
+
+  openFastTravelRef.current = (plinthEntityId: string, plinthName: string) => {
+    if (!currentProject) return;
+    setDiscoveredPlinthKeys(getDiscoveredPlinthKeys(currentProject.id));
+    setWorldMapOpen(false);
+    setFastTravelState({ plinthEntityId, plinthName });
+  };
+
+  useEffect(() => {
+    return subscribeOpenInGameWorldMap(() => {
+      if (
+        showTitleRef.current ||
+        flagsRef.current.paused ||
+        flagsRef.current.finished ||
+        flagsRef.current.dead
+      ) {
+        return;
+      }
+      setFastTravelState(null);
+      setWorldMapOpen(true);
+    });
+  }, []);
+
   useEffect(() => {
     if (showTitle || !currentProject?.storybook?.enabled) {
       setChapterBannerVisible(false);
@@ -611,6 +686,14 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
   rehearseSkitIdRef.current = store.rehearseSkitId;
 
   const isRoguelike = currentLevel?.gameplayMode === 'roguelike';
+  const savedProgressForTitle = useMemo(() => {
+    if (!showTitle || !currentProject || isRoguelike) return null;
+    const saved = loadSavedPlayProgress(currentProject.id);
+    if (!saved) return null;
+    const lvl = currentProject.levels.find((l) => l.id === saved.levelId);
+    if (!lvl) return null;
+    return { saved, levelName: lvl.name };
+  }, [showTitle, currentProject, isRoguelike]);
   const roguelikeConfig = currentLevel?.roguelikeConfig ?? DEFAULT_ROGUELIKE_CONFIG;
 
   const createFreshRoguelikeRun = useCallback((cfg: typeof DEFAULT_ROGUELIKE_CONFIG) => {
@@ -888,10 +971,12 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
   }, [activeSpeeches, chatSettings.displayMode]);
 
   const panelPausesMovement = Boolean(
-    activeBottomSpeech &&
+    (activeBottomSpeech &&
       chatSettings.panelPauseGame &&
       !activeBottomSpeech.isProximity &&
-      activeBottomSpeech.outputMode !== 'audio'
+      activeBottomSpeech.outputMode !== 'audio') ||
+      worldMapOpen ||
+      fastTravelState !== null
   );
 
   const showToastGlobal = useCallback((msg: string) => {
@@ -1344,6 +1429,8 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
       dead ||
       panelPausesMovement ||
       inventoryOpen ||
+      worldMapOpen ||
+      fastTravelState !== null ||
       hasRelicDraftOpen,
     finished,
     dead,
@@ -1351,10 +1438,27 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
 
   useEffect(() => {
     store.setPlayModalOpen(
-      showTitle || paused || finished || dead || inventoryOpen || hasRelicDraftOpen
+      showTitle ||
+        paused ||
+        finished ||
+        dead ||
+        inventoryOpen ||
+        worldMapOpen ||
+        fastTravelState !== null ||
+        hasRelicDraftOpen
     );
     return () => store.setPlayModalOpen(false);
-  }, [showTitle, paused, finished, dead, inventoryOpen, hasRelicDraftOpen, store.setPlayModalOpen]);
+  }, [
+    showTitle,
+    paused,
+    finished,
+    dead,
+    inventoryOpen,
+    worldMapOpen,
+    fastTravelState,
+    hasRelicDraftOpen,
+    store.setPlayModalOpen,
+  ]);
 
   const enabledSet = useMemo(
     () => new Set(currentProject?.enabledActions ?? []),
@@ -1392,6 +1496,23 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
           });
         }
         return;
+      }
+
+      if (e.code === 'KeyM' && !e.repeat) {
+        const activeTag = (document.activeElement as HTMLElement | null)?.tagName;
+        if (activeTag !== 'INPUT' && activeTag !== 'TEXTAREA' && activeTag !== 'SELECT') {
+          e.preventDefault();
+          if (
+            !showTitleRef.current &&
+            !flagsRef.current.paused &&
+            !flagsRef.current.finished &&
+            !flagsRef.current.dead
+          ) {
+            setFastTravelState(null);
+            setWorldMapOpen((open) => !open);
+          }
+          return;
+        }
       }
 
       // When Bottom Chat Panel is open & blocking, allow E / Space / Enter / Escape to advance or close
@@ -1502,11 +1623,17 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
           handleHoldItem(picked.id);
         }
       } else if (e.code === 'Escape') {
-        setInventoryOpen((open) => {
-          if (open) return false;
-          setPaused((p) => !p);
-          return false;
-        });
+        if (fastTravelStateRef.current) {
+          setFastTravelState(null);
+        } else if (worldMapOpenRef.current) {
+          setWorldMapOpen(false);
+        } else {
+          setInventoryOpen((open) => {
+            if (open) return false;
+            setPaused((p) => !p);
+            return false;
+          });
+        }
       }
       inputRef.current.keys.add(e.code);
     };
@@ -1824,10 +1951,19 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
       if (activeProject.heroCustomAssetId) {
         preloadTasks.push(loadCustomAssetToCache(activeProject.heroCustomAssetId, 'character'));
       }
+      if (activeProject.savePlinthAssetId) {
+        const plinthMeta = activeAssets.find((a) => a.id === activeProject.savePlinthAssetId);
+        preloadTasks.push(
+          loadCustomAssetToCache(activeProject.savePlinthAssetId, plinthMeta?.category ?? 'prop')
+        );
+      }
       for (const ent of activeLevel.entities) {
-        if (ent.customAssetId) {
-          const meta = activeAssets.find((a) => a.id === ent.customAssetId);
-          preloadTasks.push(loadCustomAssetToCache(ent.customAssetId, meta?.category ?? 'prop'));
+        const resolvedEntAssetId =
+          ent.customAssetId ??
+          (isSavePlinthEntity(ent) ? activeProject.savePlinthAssetId : undefined);
+        if (resolvedEntAssetId) {
+          const meta = activeAssets.find((a) => a.id === resolvedEntAssetId);
+          preloadTasks.push(loadCustomAssetToCache(resolvedEntAssetId, meta?.category ?? 'prop'));
         }
         if (ent.kind === 'fxEmitter' && ent.fxEmitter?.customMeshAssetId) {
           const meta = activeAssets.find((a) => a.id === ent.fxEmitter?.customMeshAssetId);
@@ -1942,11 +2078,28 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
       const openedDoorIds = new Set<string>();
       const collisionCtx: CollisionFilterContext = { choppedTreeIds, openedDoorIds };
 
+      const pendingTravel = consumePendingPlinthTravel(activeProject.id, activeLevel.id);
+      const resumeSaved =
+        !pendingTravel &&
+        resumeSavedRef.current &&
+        resumeSavedRef.current.levelId === activeLevel.id
+          ? resumeSavedRef.current
+          : null;
+      if (resumeSaved) {
+        resumeSavedRef.current = null;
+      }
+      const carryStats = crossLevelCarryRef.current;
+      crossLevelCarryRef.current = null;
+      const spawnedOnPlinthId =
+        pendingTravel?.plinthEntityId ?? resumeSaved?.plinthEntityId ?? null;
+
       const [rawStartX, rawStartZ] = levelBoardToWorld(activeLevel, spawnPoint);
+      const desiredStartX = pendingTravel?.localX ?? resumeSaved?.localX ?? rawStartX;
+      const desiredStartZ = pendingTravel?.localZ ?? resumeSaved?.localZ ?? rawStartZ;
       const [startX, startZ] = resolveHorizontalCollision(
         activeLevel,
-        rawStartX,
-        rawStartZ,
+        desiredStartX,
+        desiredStartZ,
         isDriving ? 1.15 : 0.62,
         true,
         collisionCtx
@@ -1955,6 +2108,31 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
       let heroZ = startZ;
       let heroY = Math.max(0.2, sampleLevelHeight(activeLevel, heroX, heroZ));
       let heroVelY = 0;
+
+      const effectiveMapInfo = getEffectiveMapInfo(activeProject, activeLevel);
+      const revealAtHero = () => {
+        const [mx, mz] = levelLocalToMapCoords(activeProject, activeLevel, heroX, heroZ);
+        revealExplorationAtCoords(
+          activeProject.id,
+          mx,
+          mz,
+          effectiveMapInfo.radius,
+          isDriving ? 34 : 26
+        );
+        return [mx, mz] as const;
+      };
+      const [initMapX, initMapZ] = revealAtHero();
+      liveHeroTransformRef.current = { x: heroX, z: heroZ, yaw: 0 };
+      publishLivePlayerTelemetry({
+        levelId: activeLevel.id,
+        point: levelWorldToBoard(activeLevel, heroX, heroZ),
+        yaw: 0,
+        worldX: initMapX,
+        worldZ: initMapZ,
+        buddiesFound: 0,
+        buddiesTotal: 0,
+        trail: [],
+      });
       let heroYaw = env === 'sideScroller' ? Math.PI * 0.5 : isDriving ? Math.PI * 0.55 : isBuddies ? Math.PI * 0.72 : Math.PI;
       if (isDriving) {
         const firstCp = activeLevel.entities
@@ -2133,10 +2311,14 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
 
       // Runtime entities
       let playWallTorchLightCount = 0;
+      let playSavePlinthLightCount = 0;
       const runtimeEntities: RuntimeEntity[] = activeLevel.entities.map((ent) => {
         let customInst: CustomModelInstance | null = null;
         let fxRuntime: FxEmitterRuntime | null = null;
         let mesh: THREE.Group;
+        const resolvedCustomAssetId =
+          ent.customAssetId ??
+          (isSavePlinthEntity(ent) ? activeProject.savePlinthAssetId : undefined);
         if (ent.kind === 'fxEmitter') {
           fxRuntime = new FxEmitterRuntime(
             ent.fxEmitter ?? createDefaultFxEmitterConfig('fire'),
@@ -2168,11 +2350,11 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
           mesh.scale.setScalar(ent.scale);
           mesh.rotation.y = (ent.rotation * Math.PI) / 180;
         } else {
-          const meta = ent.customAssetId
-            ? activeAssets.find((a) => a.id === ent.customAssetId)
+          const meta = resolvedCustomAssetId
+            ? activeAssets.find((a) => a.id === resolvedCustomAssetId)
             : undefined;
-          if (ent.customAssetId) {
-            customInst = instantiateCustomModel(ent.customAssetId, meta, {
+          if (resolvedCustomAssetId) {
+            customInst = instantiateCustomModel(resolvedCustomAssetId, meta, {
               scaleAdjust: ent.modelScaleAdjust ?? 1,
               offsetY: ent.modelOffsetY ?? 0,
               visualStyle: style,
@@ -2251,6 +2433,11 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
           wallTorchLight = new THREE.PointLight('#FF9C40', 4.5, 11, 1.8);
           wallTorchLight.position.set(0, 1.82, 0.38);
           mesh.add(wallTorchLight);
+        } else if (isSavePlinthEntity(ent) && playSavePlinthLightCount < 6) {
+          playSavePlinthLightCount++;
+          const plinthLight = new THREE.PointLight('#38BDF8', 4.2, 9.5, 1.8);
+          plinthLight.position.set(0, 1.75, 0);
+          mesh.add(plinthLight);
         }
         if (ent.kind === 'baddie' && baddieRig && ent.materialVariant) {
           baddieRig.flashMaterials = customFlashMats as unknown as THREE.MeshStandardMaterial[];
@@ -2273,8 +2460,8 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
         }
 
         // Attach MechanismRuntimeController if entity or its custom asset defines hinges/sliders
-        const customMeta = ent.customAssetId
-          ? activeAssets.find((a) => a.id === ent.customAssetId)
+        const customMeta = resolvedCustomAssetId
+          ? activeAssets.find((a) => a.id === resolvedCustomAssetId)
           : undefined;
         const resolvedMechs: ObjectMechanism[] =
           ent.mechanisms && ent.mechanisms.length > 0
@@ -2765,16 +2952,24 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
             )
           )
         : 6;
-      let maxHealth = baseStartMaxHealth + (initRelicMods?.maxHealthBonus ?? 0);
-      let health = isRoguelikeLevel
-        ? Math.min(maxHealth, Math.max(1, runInit.currentHealth))
-        : maxHealth;
+      let maxHealth = carryStats?.maxHealth ?? resumeSaved?.maxHealth ?? (baseStartMaxHealth + (initRelicMods?.maxHealthBonus ?? 0));
+      let health =
+        carryStats?.health ??
+        resumeSaved?.health ??
+        (isRoguelikeLevel
+          ? Math.min(maxHealth, Math.max(1, runInit.currentHealth))
+          : maxHealth);
       let stamina = 100;
       let staminaExhausted = false;
       let lastStaminaToast = -10;
       let magic = 100;
-      let coins = isRoguelikeLevel ? runInit.coinsEarned : 0;
-      let keys = 0;
+      let coins = carryStats?.coins ?? resumeSaved?.coins ?? (isRoguelikeLevel ? runInit.coinsEarned : 0);
+      let keys = carryStats?.keys ?? resumeSaved?.keys ?? 0;
+      const insideSavePlinthIds = new Set<string>();
+      let savePlinthCooldownUntil = spawnedOnPlinthId ? 1.6 : 0;
+      if (spawnedOnPlinthId) {
+        insideSavePlinthIds.add(spawnedOnPlinthId);
+      }
       let floorDraftTriggered = false;
       let lastPortalLockedToastAt = -10;
       let lastRoguelikeBaddiesLeft = -1;
@@ -2800,6 +2995,55 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
       let lastShadowUpdateTime = -1;
       const staticObjectives = activeLevel.objectives.map((o) => o.text);
       let shakeTimer = 0;
+
+      liveStatsGetterRef.current = () => ({ coins, keys, health, maxHealth });
+      sameLevelTravelFnRef.current = (target: SavePlinthTarget) => {
+        const [destX, destZ] = resolveHorizontalCollision(
+          activeLevel,
+          target.localX,
+          target.localZ,
+          isDriving ? 1.15 : 0.62,
+          true,
+          collisionCtx
+        );
+        heroX = destX;
+        heroZ = destZ;
+        heroY = Math.max(0.2, sampleLevelHeight(activeLevel, heroX, heroZ));
+        heroVelY = 0;
+        carVelX = 0;
+        carVelZ = 0;
+        respawnX = destX;
+        respawnZ = destZ;
+        respawnYaw = heroYaw;
+        insideSavePlinthIds.add(target.entityId);
+        savePlinthCooldownUntil = gameElapsed + 1.8;
+        heroRoot.position.set(heroX, heroY, heroZ);
+        if (carRig) {
+          carRig.group.position.set(heroX, heroY, heroZ);
+        }
+        const [mx, mz] = revealAtHero();
+        liveHeroTransformRef.current = { x: heroX, z: heroZ, yaw: heroYaw };
+        publishLivePlayerTelemetry({
+          levelId: activeLevel.id,
+          point: levelWorldToBoard(activeLevel, heroX, heroZ),
+          yaw: heroYaw,
+          worldX: mx,
+          worldZ: mz,
+          buddiesFound: recruitedBuddyIds.length,
+          buddiesTotal: buddyEntities.length,
+          trail: [...boardTrail],
+        });
+        spawnCombatSparks(heroX, heroY + 1.4, heroZ, '#38BDF8', 20, 7.5);
+        AudioEngine.playSound('sparkle');
+        const snapDist = inputRef.current.cameraDistance;
+        camera.position.set(
+          heroX + Math.sin(inputRef.current.cameraYaw) * snapDist,
+          heroY + 3.8,
+          heroZ + Math.cos(inputRef.current.cameraYaw) * snapDist
+        );
+        camera.lookAt(heroX, heroY + 1.15, heroZ);
+        showToast(`Fast-traveled to ${target.name}`);
+      };
 
       // Zero-allocation scratch vectors for tick()
       const _targetCamPos = new THREE.Vector3();
@@ -5579,6 +5823,59 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
               showToast(
                 `Picked up ${rt.pickupQty > 1 ? `${rt.pickupQty}× ` : ''}${itemDef?.name ?? rt.name}!`
               );
+            } else if (isSavePlinthEntity({ kind: rt.kind, name: rt.name, propPreset: rt.propPreset })) {
+              const touchRadius = isDriving ? 4.8 : 2.35;
+              const leaveRadius = isDriving ? 5.8 : 3.2;
+              if (dist < touchRadius) {
+                if (!insideSavePlinthIds.has(rt.id) && gameElapsed >= savePlinthCooldownUntil) {
+                  insideSavePlinthIds.add(rt.id);
+                  savePlinthCooldownUntil = gameElapsed + 1.8;
+                  const plinthKey = makePlinthKey(activeLevel.id, rt.id);
+                  const wasNew = markPlinthDiscovered(activeProject.id, plinthKey);
+                  if (!clearedCheckpointIds.includes(rt.id)) clearedCheckpointIds.push(rt.id);
+                  respawnX = rt.x;
+                  respawnZ = rt.z;
+                  respawnYaw = heroYaw;
+                  AudioEngine.playSound('chime');
+                  AudioEngine.playSound('sparkle');
+                  spawnCombatSparks(
+                    rt.x,
+                    sampleLevelHeight(activeLevel, rt.x, rt.z) + 1.8,
+                    rt.z,
+                    '#38BDF8',
+                    18,
+                    7.2
+                  );
+                  savePlayProgress({
+                    projectId: activeProject.id,
+                    levelId: activeLevel.id,
+                    levelName: activeLevel.name,
+                    plinthEntityId: rt.id,
+                    plinthName: rt.name,
+                    localX: rt.x,
+                    localZ: rt.z,
+                    savedAt: Date.now(),
+                    coins,
+                    keys,
+                    health,
+                    maxHealth,
+                    inventoryStacks: inventoryStacksRef.current,
+                    equipment: equipmentRef.current,
+                    discoveredPlinthKeys: Array.from(getDiscoveredPlinthKeys(activeProject.id)),
+                    explorationB64: encodeExplorationBase64(
+                      getExplorationSnapshot(activeProject.id).data
+                    ),
+                  });
+                  showToast(
+                    wasNew
+                      ? `Save Plinth Discovered & Saved: ${rt.name}!`
+                      : `Progress Saved at ${rt.name}`
+                  );
+                  openFastTravelRef.current(rt.id, rt.name);
+                }
+              } else if (dist > leaveRadius && insideSavePlinthIds.has(rt.id)) {
+                insideSavePlinthIds.delete(rt.id);
+              }
             } else if (rt.kind === 'checkpoint' && !rt.opened && dist < (isDriving ? 4.8 : 1.8)) {
               rt.opened = true;
               if (!clearedCheckpointIds.includes(rt.id)) clearedCheckpointIds.push(rt.id);
@@ -7123,6 +7420,8 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
               speedNow !== lastPubSpeed;
 
             if (trailChanged || buddyChanged || cpChanged || movedChanged) {
+              const [mapX, mapZ] = revealAtHero();
+              liveHeroTransformRef.current = { x: heroX, z: heroZ, yaw: heroYaw };
               if (buddyChanged) {
                 lastPubBuddyCount = recruitedBuddyIds.length;
                 cachedRecruitedBuddyIds = [...recruitedBuddyIds];
@@ -7142,6 +7441,8 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
                 levelId: activeLevel.id,
                 point: curPt,
                 yaw: heroYaw,
+                worldX: mapX,
+                worldZ: mapZ,
                 speedKmh: speedNow,
                 buddiesFound: recruitedBuddyIds.length,
                 buddiesTotal: buddyEntities.length,
@@ -7674,6 +7975,8 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
 
     return () => {
       disposed = true;
+      sameLevelTravelFnRef.current = null;
+      liveStatsGetterRef.current = null;
       islandAbort?.abort();
       islandAbort = null;
       setHarvestPrompt(null);
@@ -7757,6 +8060,44 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
     showToastGlobal(`Claimed ${relic.name} — descending to Floor ${nextFloor}`);
   };
 
+  const handleFastTravelToPlinth = useCallback(
+    (target: SavePlinthTarget) => {
+      if (!currentProject || !activePlayLevel) return;
+      AudioEngine.playSound('chime');
+      const plinthKey = makePlinthKey(target.levelId, target.entityId);
+      markPlinthDiscovered(currentProject.id, plinthKey);
+      setDiscoveredPlinthKeys(getDiscoveredPlinthKeys(currentProject.id));
+      setFastTravelState(null);
+      setWorldMapOpen(false);
+      if (target.levelId === activePlayLevel.id && sameLevelTravelFnRef.current) {
+        sameLevelTravelFnRef.current(target);
+        return;
+      }
+      const liveStats = liveStatsGetterRef.current?.();
+      if (liveStats) {
+        crossLevelCarryRef.current = liveStats;
+      }
+      setPendingPlinthTravel({
+        projectId: currentProject.id,
+        levelId: target.levelId,
+        plinthEntityId: target.entityId,
+        plinthName: target.name,
+        localX: target.localX,
+        localZ: target.localZ,
+        coins: liveStats?.coins ?? 0,
+        keys: liveStats?.keys ?? 0,
+        health: liveStats?.health ?? 6,
+        maxHealth: liveStats?.maxHealth ?? 6,
+        inventoryStacks: inventoryStacksRef.current,
+        equipment: equipmentRef.current,
+      });
+      store.setSelectedLevelID(target.levelId);
+      setResetTick((t) => t + 1);
+      showToastGlobal(`Traveling to ${target.levelName} · ${target.name}`);
+    },
+    [currentProject, activePlayLevel, store, showToastGlobal]
+  );
+
   const handleRestart = () => {
     AudioEngine.stopVoice();
     if (isRoguelike) {
@@ -7764,6 +8105,16 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
         createFreshRoguelikeRun(currentLevel.roguelikeConfig ?? DEFAULT_ROGUELIKE_CONFIG)
       );
     }
+    if (currentProject) {
+      resetExploration(currentProject.id);
+      clearDiscoveredPlinths(currentProject.id);
+      clearSavedPlayProgress(currentProject.id);
+      setDiscoveredPlinthKeys(new Set());
+    }
+    resumeSavedRef.current = null;
+    crossLevelCarryRef.current = null;
+    setWorldMapOpen(false);
+    setFastTravelState(null);
     setFinished(false);
     setDead(false);
     setPaused(false);
@@ -7867,7 +8218,14 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
   };
 
   const controlsActive =
-    !showTitle && !paused && !finished && !dead && !panelPausesMovement && !inventoryOpen;
+    !showTitle &&
+    !paused &&
+    !finished &&
+    !dead &&
+    !panelPausesMovement &&
+    !inventoryOpen &&
+    !worldMapOpen &&
+    fastTravelState === null;
 
   return (
     <div className="fixed inset-0 z-50 bg-black select-none overflow-hidden">
@@ -7936,6 +8294,24 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
           <div className="px-4 py-1.5 rounded-xl bg-black/70 text-white text-xs font-extrabold whitespace-nowrap">
             {activePlayLevel?.name ?? currentLevel.name}
           </div>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.currentTarget.blur();
+              setFastTravelState(null);
+              setWorldMapOpen((o) => !o);
+            }}
+            className={`px-3 h-9 rounded-xl border text-xs font-extrabold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap ${
+              worldMapOpen || fastTravelState !== null
+                ? 'bg-[#0EA5E9] border-[#0EA5E9] text-white'
+                : 'bg-black/70 border-white/15 text-white hover:bg-black/85'
+            }`}
+            title="Open World Map (M)"
+          >
+            <MapIcon size={14} />
+            <span>Map</span>
+            <span className="px-1.5 py-0.5 rounded bg-white/15 text-[10px] font-bold">M</span>
+          </button>
           <button
             type="button"
             onClick={(e) => {
@@ -8566,14 +8942,14 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
             {vultureLookoutActive
               ? 'High Sight Aerial Lookout · Press Q or Space to return to trail'
               : resolvedCamMode === 'sideScroll'
-              ? `A/D or Stick move · W/Space jump · F hit · E use · ${formatKeyCodeLabel(inventoryConfig.toggleKey)} bag`
+              ? `A/D or Stick move · W/Space jump · F hit · E use · M map · ${formatKeyCodeLabel(inventoryConfig.toggleKey)} bag`
               : isBuddiesMode
-              ? `WASD move · Q use power · X switch power · E gather/talk · ${formatKeyCodeLabel(inventoryConfig.toggleKey)} bag · V POV`
+              ? `WASD move · Q use power · X switch power · E gather/talk · M map · ${formatKeyCodeLabel(inventoryConfig.toggleKey)} bag · V POV`
               : resolvedCamMode === 'firstPerson'
-              ? `W/S move · A/D turn · Space jump · F hit · E gather/bench · ${formatKeyCodeLabel(inventoryConfig.toggleKey)} bag · V exit POV`
+              ? `W/S move · A/D turn · Space jump · F hit · E gather/bench · M map · ${formatKeyCodeLabel(inventoryConfig.toggleKey)} bag · V exit POV`
               : resolvedCamMode === 'front'
-              ? `WASD or Stick move · Space jump · F use tool / hit · E gather/bench · ${formatKeyCodeLabel(inventoryConfig.toggleKey)} bag · V POV`
-              : `WASD move · Space jump · F use tool / hit · E gather/bench · ${formatKeyCodeLabel(inventoryConfig.toggleKey)} bag · V POV`}
+              ? `WASD or Stick move · Space jump · F use tool / hit · E gather/bench · M map · ${formatKeyCodeLabel(inventoryConfig.toggleKey)} bag · V POV`
+              : `WASD move · Space jump · F use tool / hit · E gather/bench · M map · ${formatKeyCodeLabel(inventoryConfig.toggleKey)} bag · V POV`}
           </div>
         </div>
       )}
@@ -8583,6 +8959,26 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
         <div className="fixed top-18 left-1/2 -translate-x-1/2 px-4 py-2 rounded-xl bg-[#171A23]/95 border border-white/10 text-white text-xs font-bold shadow-lg z-30">
           {toast}
         </div>
+      )}
+
+      {/* In-Game World Map & Save Plinth Fast-Travel Overlay */}
+      {(worldMapOpen || fastTravelState !== null) && !showTitle && !dead && !finished && activePlayLevel && (
+        <InGameWorldMapModal
+          project={currentProject}
+          currentLevel={activePlayLevel}
+          mode={fastTravelState ? 'fastTravel' : 'worldMap'}
+          currentPlinthEntityId={fastTravelState?.plinthEntityId}
+          currentPlinthName={fastTravelState?.plinthName}
+          heroLocalX={liveHeroTransformRef.current.x}
+          heroLocalZ={liveHeroTransformRef.current.z}
+          heroYaw={liveHeroTransformRef.current.yaw}
+          discoveredPlinthKeys={discoveredPlinthKeys}
+          onFastTravel={handleFastTravelToPlinth}
+          onClose={() => {
+            setFastTravelState(null);
+            setWorldMapOpen(false);
+          }}
+        />
       )}
 
       {/* Inventory & Crafting Bench Modal Overlay */}
@@ -8812,17 +9208,52 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
                 <Pill text={currentProject.difficulty} tint="#F59E0B" />
               </div>
               <div className="pt-2 space-y-2">
+                {savedProgressForTitle && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      (document.activeElement as HTMLElement | null)?.blur?.();
+                      AudioEngine.unlock();
+                      const { saved } = savedProgressForTitle;
+                      hydrateExploration(currentProject.id, saved.explorationB64);
+                      hydrateDiscoveredPlinths(currentProject.id, saved.discoveredPlinthKeys);
+                      setDiscoveredPlinthKeys(getDiscoveredPlinthKeys(currentProject.id));
+                      resumeSavedRef.current = saved;
+                      setInventoryStacks(saved.inventoryStacks);
+                      setEquipment(saved.equipment);
+                      if (saved.levelId !== currentLevel.id) {
+                        store.setSelectedLevelID(saved.levelId);
+                      }
+                      setShowTitle(false);
+                    }}
+                    className="w-full py-3 rounded-2xl bg-[#0EA5E9] hover:bg-[#0284C7] text-white text-sm font-extrabold inline-flex items-center justify-center gap-2 shadow-md px-3"
+                  >
+                    <Play size={16} fill="currentColor" />
+                    <span className="truncate">
+                      Continue at {savedProgressForTitle.saved.plinthName} ({savedProgressForTitle.levelName})
+                    </span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => {
                     (document.activeElement as HTMLElement | null)?.blur?.();
                     AudioEngine.unlock();
+                    if (savedProgressForTitle) {
+                      resetExploration(currentProject.id);
+                      clearDiscoveredPlinths(currentProject.id);
+                      clearSavedPlayProgress(currentProject.id);
+                      setDiscoveredPlinthKeys(new Set());
+                      resumeSavedRef.current = null;
+                    }
                     setShowTitle(false);
                   }}
-                  className="w-full py-3.5 rounded-2xl bg-[#20B46A] text-white text-base font-extrabold hover:opacity-95 inline-flex items-center justify-center gap-2 shadow-md"
+                  className={`w-full py-3.5 rounded-2xl text-white text-base font-extrabold hover:opacity-95 inline-flex items-center justify-center gap-2 shadow-md ${
+                    savedProgressForTitle ? 'bg-[#20B46A]/90' : 'bg-[#20B46A]'
+                  }`}
                 >
                   <Play size={18} fill="currentColor" />
-                  <span>Start Adventure</span>
+                  <span>{savedProgressForTitle ? 'Start Fresh Adventure' : 'Start Adventure'}</span>
                 </button>
                 <button
                   type="button"
@@ -8850,6 +9281,17 @@ export const PlayModeView: React.FC<{ store: MakerStore }> = ({ store }) => {
               className="w-full py-2.5 rounded-xl bg-[#7C5CFF] text-white text-sm font-bold"
             >
               Keep Playing
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setPaused(false);
+                setFastTravelState(null);
+                setWorldMapOpen(true);
+              }}
+              className="w-full py-2.5 rounded-xl bg-[#0EA5E9]/15 text-[#0284C7] dark:text-[#38BDF8] text-sm font-bold"
+            >
+              World Map (M)
             </button>
             <button
               type="button"

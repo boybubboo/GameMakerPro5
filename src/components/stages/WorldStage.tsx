@@ -230,6 +230,7 @@ export const WorldStage: React.FC<{ store: MakerStore }> = ({ store }) => {
   const showLeftPanel = leftPanelMode !== 'hidden';
 
   const [activePlacementAssetId, setActivePlacementAssetId] = useState<string | null>(null);
+  const [dropPreset, setDropPreset] = useState<'savePlinth' | null>(null);
   const [curveGuideEnabled, setCurveGuideEnabled] = useState(false);
   const [curveSpan, setCurveSpan] = useState(10);
   const [curveBend, setCurveBend] = useState(3.2);
@@ -1669,6 +1670,20 @@ export const WorldStage: React.FC<{ store: MakerStore }> = ({ store }) => {
                       className="accent-[#7C5CFF] w-4 h-4"
                     />
                   </label>
+                  <label className="flex items-center justify-between gap-2 text-xs font-semibold cursor-pointer">
+                    <span>Fog of War (hide untravelled map)</span>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(currentProject.worldMapFogOfWar)}
+                      onChange={(e) =>
+                        store.updateProject('toggle map fog of war', (proj) => ({
+                          ...proj,
+                          worldMapFogOfWar: e.target.checked,
+                        }))
+                      }
+                      className="accent-[#38BDF8] w-4 h-4 shrink-0"
+                    />
+                  </label>
                   {envType === 'openWorld' && (
                     <button
                       type="button"
@@ -2272,6 +2287,23 @@ export const WorldStage: React.FC<{ store: MakerStore }> = ({ store }) => {
                     }
                   } else if (dropCustomAssetId) {
                     placeCustomAssetAtPoint(dropCustomAssetId, pos, elev);
+                  } else if (dropPreset === 'savePlinth') {
+                    const created = store.addEntity(
+                      'checkpoint',
+                      'Save Plinth',
+                      pos,
+                      currentProject.savePlinthAssetId
+                    );
+                    if (created) {
+                      store.updateEntity(
+                        created.id,
+                        'configure save plinth',
+                        (ent) => ({ ...ent, propPreset: 'savePlinth' }),
+                        false
+                      );
+                    }
+                    setDropPreset(null);
+                    setTool('move');
                   } else {
                     const meta = EntityKindMeta[dropKind];
                     store.addEntity(dropKind, meta.defaultName, pos);
@@ -2634,13 +2666,14 @@ export const WorldStage: React.FC<{ store: MakerStore }> = ({ store }) => {
               <div className="rounded-2xl bg-white dark:bg-[#171A23] border border-slate-200/80 dark:border-white/[0.08] p-2 flex gap-1.5 overflow-x-auto maker-scroll">
                 {DropKinds.map((k) => {
                   const meta = EntityKindMeta[k];
-                  const active = !dropCustomAssetId && dropKind === k;
+                  const active = !dropCustomAssetId && !dropPreset && dropKind === k;
                   return (
                     <button
                       key={k}
                       type="button"
                       onClick={() => {
                         setDropCustomAssetId('');
+                        setDropPreset(null);
                         setActivePlacementAssetId(null);
                         setDropKind(k);
                       }}
@@ -2655,6 +2688,23 @@ export const WorldStage: React.FC<{ store: MakerStore }> = ({ store }) => {
                     </button>
                   );
                 })}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDropCustomAssetId('');
+                    setActivePlacementAssetId(null);
+                    setDropKind('checkpoint');
+                    setDropPreset('savePlinth');
+                  }}
+                  className={`shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-[11px] font-bold border ${
+                    dropPreset === 'savePlinth'
+                      ? 'bg-[#0EA5E9] text-white border-[#0EA5E9]'
+                      : 'bg-[#0EA5E9]/12 text-[#0284C7] dark:text-[#38BDF8] border-[#38BDF8]/30'
+                  }`}
+                >
+                  <Compass size={13} />
+                  <span>Save Plinth</span>
+                </button>
               </div>
             )}
 

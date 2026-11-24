@@ -160,6 +160,90 @@ export function createStarterObjectDoc(): ObjectMakerDoc {
   };
 }
 
+export function createSavePlinthObjectDoc(): ObjectMakerDoc {
+  const stonePlinth = createDefaultPartSpec('cube', {
+    name: 'Plinth_Base_Slab',
+    dimensions: [1.55, 0.24, 1.55],
+    position: [0, 0.12, 0],
+    modifiers: { bevel: 0.16, chamfer: 0.18, roundness: 0.05, edgeWear: 0.22 },
+    material: createDefaultMaterialFinish('hewnStone', '#CBD5E1'),
+  });
+  const hexTier = createDefaultPartSpec('prism', {
+    name: 'Plinth_Hex_Tier',
+    dimensions: [1.14, 0.28, 1.14],
+    position: [0, 0.36, 0],
+    modifiers: { bevel: 0.14, chamfer: 0.12, roundness: 0, edgeWear: 0.15 },
+    material: createDefaultMaterialFinish('crackedSlate', '#94A3B8'),
+  });
+  const pillarBody = createDefaultPartSpec('pillar', {
+    name: 'Plinth_Pillar',
+    dimensions: [0.58, 0.92, 0.58],
+    position: [0, 0.92, 0],
+    modifiers: { bevel: 0.12, chamfer: 0.12, roundness: 0, edgeWear: 0.16 },
+    material: createDefaultMaterialFinish('hewnStone', '#CBD5E1'),
+  });
+  const topAltarCap = createDefaultPartSpec('prism', {
+    name: 'Plinth_Altar_Cap',
+    dimensions: [0.84, 0.18, 0.84],
+    position: [0, 1.44, 0],
+    modifiers: { bevel: 0.14, chamfer: 0.14, roundness: 0, edgeWear: 0.1 },
+    material: createDefaultMaterialFinish('crackedSlate', '#B4C6DC'),
+  });
+  const runeRing = createDefaultPartSpec('torus', {
+    name: 'Glowing_Rune_Ring',
+    dimensions: [1.34, 0.14, 1.34],
+    position: [0, 0.3, 0],
+    rotation: [90, 0, 0],
+    modifiers: { bevel: 0, chamfer: 0, roundness: 0, edgeWear: 0, segments: 24 },
+    material: {
+      color: '#38BDF8',
+      roughness: 0.18,
+      metalness: 0.2,
+      emissive: '#0EA5E9',
+      emissiveIntensity: 1.45,
+      weathering: 'none',
+      weatheringIntensity: 0,
+    },
+  });
+  const beaconCrystal = createDefaultPartSpec('prism', {
+    name: 'Waystone_Crystal',
+    dimensions: [0.42, 0.88, 0.42],
+    position: [0, 2.02, 0],
+    rotation: [0, 30, 0],
+    modifiers: { bevel: 0.32, chamfer: 0.45, roundness: 0, edgeWear: 0, segments: 6 },
+    material: {
+      color: '#7DD3FC',
+      roughness: 0.12,
+      metalness: 0.15,
+      emissive: '#38BDF8',
+      emissiveIntensity: 1.75,
+      weathering: 'none',
+      weatheringIntensity: 0,
+    },
+  });
+  const haloRing = createDefaultPartSpec('torus', {
+    name: 'Crystal_Halo_Ring',
+    dimensions: [0.76, 0.08, 0.76],
+    position: [0, 1.96, 0],
+    rotation: [72, 18, 0],
+    modifiers: { bevel: 0, chamfer: 0, roundness: 0, edgeWear: 0, segments: 24 },
+    material: {
+      color: '#93C5FD',
+      roughness: 0.2,
+      metalness: 0.35,
+      emissive: '#2563EB',
+      emissiveIntensity: 1.25,
+      weathering: 'none',
+      weatheringIntensity: 0,
+    },
+  });
+  return {
+    version: 1,
+    parts: [stonePlinth, hexTier, pillarBody, topAltarCap, runeRing, beaconCrystal, haloRing],
+    groups: [],
+  };
+}
+
 export function sanitizeObjectNodeName(raw: string, fallback = 'Part'): string {
   const cleaned = raw.replace(/[/\\:*?"<>|]+/g, '_').trim();
   return cleaned || fallback;
@@ -567,6 +651,11 @@ export function createPartMaterial(finish: ObjectSurfaceFinish, isCutter = false
     const wt = WEATHERING_TINT[wPreset];
     mat.color.lerp(new THREE.Color(wt.hex), wAmt * 0.55);
     mat.roughness = THREE.MathUtils.clamp(mat.roughness + wt.roughnessDelta * wAmt, 0.06, 0.99);
+  }
+
+  if (finish.emissive && (finish.emissiveIntensity ?? 0) > 0) {
+    mat.emissive = new THREE.Color(finish.emissive);
+    mat.emissiveIntensity = finish.emissiveIntensity ?? 1;
   }
 
   return mat;

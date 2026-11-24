@@ -678,6 +678,9 @@ function inferPropPresetForCollision(name?: string, explicit?: PropPresetId): Pr
   if (lower.includes('cottage') || lower.includes('burrow') || lower.includes('home')) return 'cottage';
   if (lower.includes('dock') || lower.includes('pier') || lower.includes('jetty')) return 'dock';
   if (lower.includes('campfire') || lower.includes('bonfire')) return 'campfire';
+  if (lower.includes('plinth') || lower.includes('waystone') || lower.includes('save point')) {
+    return 'savePlinth';
+  }
   if (lower.includes('ramp') || lower.includes('jump')) return 'ramp';
   if (lower.includes('arch') || lower.includes('gate')) return 'checkpointArch';
   if (lower.includes('signpost')) return 'signpost';
@@ -927,6 +930,8 @@ function buildLevelColliderGrid(level: GameLevel): CachedLevelColliderGrid {
           addObbCollider(cells, wx, wz, yaw, 1.1 * s, 0.62 * s);
         } else if (preset === 'signpost') {
           addCircleCollider(cells, wx, wz, 0.32 * s);
+        } else if (preset === 'savePlinth') {
+          addCircleCollider(cells, wx, wz, 0.45 * s);
         } else if ((ent.name ?? '').toLowerCase().includes('crate')) {
           addObbCollider(cells, wx, wz, yaw, 0.44 * s, 0.44 * s);
         } else {

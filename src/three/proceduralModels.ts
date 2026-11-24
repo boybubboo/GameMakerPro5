@@ -81,6 +81,9 @@ export function resolvePropPreset(name?: string, explicit?: PropPresetId): PropP
   if (lower.includes('cottage') || lower.includes('burrow') || lower.includes('home')) return 'cottage';
   if (lower.includes('dock') || lower.includes('pier') || lower.includes('jetty')) return 'dock';
   if (lower.includes('campfire') || lower.includes('bonfire')) return 'campfire';
+  if (lower.includes('plinth') || lower.includes('waystone') || lower.includes('save point')) {
+    return 'savePlinth';
+  }
   if (lower.includes('ramp') || lower.includes('jump')) return 'ramp';
   if (lower.includes('arch') || lower.includes('gate')) return 'checkpointArch';
   if (lower.includes('signpost')) return 'signpost';
@@ -959,6 +962,78 @@ function buildPropPresetMesh(preset: PropPresetId): THREE.Group {
       flaskBulb,
       flaskNeck
     );
+  } else if (preset === 'savePlinth') {
+    const plinthSlateMat = new THREE.MeshStandardMaterial({
+      color: '#475569',
+      roughness: 0.72,
+      metalness: 0.14,
+      flatShading: true,
+    });
+    const plinthTrimMat = new THREE.MeshStandardMaterial({
+      color: '#94A3B8',
+      roughness: 0.45,
+      metalness: 0.35,
+      flatShading: true,
+    });
+    const runeGlowMat = new THREE.MeshStandardMaterial({
+      color: '#38BDF8',
+      emissive: '#0EA5E9',
+      emissiveIntensity: 1.55,
+      roughness: 0.18,
+    });
+    const crystalGlowMat = new THREE.MeshStandardMaterial({
+      color: '#BAE6FD',
+      emissive: '#38BDF8',
+      emissiveIntensity: 1.9,
+      roughness: 0.12,
+      metalness: 0.2,
+      flatShading: true,
+    });
+    const auraMat = new THREE.MeshBasicMaterial({
+      color: '#38BDF8',
+      transparent: true,
+      opacity: 0.28,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+
+    const auraDisc = new THREE.Mesh(new THREE.RingGeometry(0.65, 1.38, 28), auraMat);
+    auraDisc.rotation.x = -Math.PI / 2;
+    auraDisc.position.y = 0.03;
+
+    const baseStep = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.04, 0.22, 8), plinthSlateMat);
+    baseStep.position.y = 0.11;
+    baseStep.castShadow = true;
+    baseStep.receiveShadow = true;
+
+    const midTier = new THREE.Mesh(new THREE.CylinderGeometry(0.68, 0.78, 0.24, 6), plinthTrimMat);
+    midTier.position.y = 0.34;
+    midTier.castShadow = true;
+    midTier.receiveShadow = true;
+
+    const runeRing = new THREE.Mesh(new THREE.TorusGeometry(0.76, 0.055, 8, 24), runeGlowMat);
+    runeRing.rotation.x = Math.PI / 2;
+    runeRing.position.y = 0.25;
+
+    const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.42, 0.92, 6), plinthSlateMat);
+    pillar.position.y = 0.9;
+    pillar.castShadow = true;
+
+    const crownCap = new THREE.Mesh(new THREE.CylinderGeometry(0.48, 0.36, 0.18, 6), plinthTrimMat);
+    crownCap.position.y = 1.42;
+    crownCap.castShadow = true;
+
+    const crystal = new THREE.Mesh(new THREE.OctahedronGeometry(0.28, 0), crystalGlowMat);
+    crystal.scale.set(0.82, 1.48, 0.82);
+    crystal.position.y = 2.02;
+    crystal.userData.floatSpin = true;
+
+    const halo = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.038, 8, 24), runeGlowMat);
+    halo.position.y = 1.98;
+    halo.rotation.set(1.15, 0.3, 0);
+    halo.userData.floatSpin = true;
+
+    g.add(auraDisc, baseStep, midTier, runeRing, pillar, crownCap, crystal, halo);
   } else {
     // signpost
     const post = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.11, 2.05, 10, 4), oakMat);
@@ -2550,8 +2625,9 @@ export function buildEntityMesh(entity: LevelEntity): THREE.Group {
     }
 
     case 'checkpoint': {
-      if (resolvePropPreset(entity.name, entity.propPreset) === 'checkpointArch') {
-        group.add(buildPropPresetMesh('checkpointArch'));
+      const cpPreset = resolvePropPreset(entity.name, entity.propPreset);
+      if (cpPreset === 'checkpointArch' || cpPreset === 'savePlinth') {
+        group.add(buildPropPresetMesh(cpPreset));
         break;
       }
       addShadow(0.4);

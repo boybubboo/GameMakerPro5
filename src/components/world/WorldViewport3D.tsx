@@ -87,6 +87,7 @@ import {
 } from '../../three/nodeMaterialUtils';
 import { runDeferredChunks } from '../../utils/deferredLoader';
 import { readJsHeapUsageMB } from '../../utils/resourceMonitor';
+import { isSavePlinthEntity } from '../../utils/worldMapFog';
 
 import { FX_DRAG_MIME } from './FxLibraryPanel';
 import { MAKER_ASSET_DRAG_MIME } from './LeftAssetsPanel';
@@ -2515,6 +2516,7 @@ export const WorldViewport3D: React.FC<WorldViewport3DProps> = ({
       project.heroCustomAssetId,
       project.heroModelScale,
       project.heroModelOffsetY,
+      project.savePlinthAssetId,
       customAssets.length,
       texInvalidationTick,
     ]);
@@ -2679,8 +2681,14 @@ export const WorldViewport3D: React.FC<WorldViewport3DProps> = ({
     // Track live fxEmitter IDs to keep persistent FxEmitterRuntime pools smooth while editing sliders
     const activeFxIds = new Set<string>();
     const deferredCanopyEntities: Array<{ ent: LevelEntity; anchor: THREE.Group }> = [];
-    const deferredCustomEntities: Array<{ ent: LevelEntity; anchor: THREE.Group; isCached: boolean }> = [];
+    const deferredCustomEntities: Array<{
+      ent: LevelEntity;
+      anchor: THREE.Group;
+      customAssetId: string;
+      isCached: boolean;
+    }> = [];
     let wallTorchAddedLight = 0;
+    let savePlinthAddedLight = 0;
 
     for (const ent of level.entities) {
       if (ent.kind === 'fxEmitter') {
@@ -2719,20 +2727,34 @@ export const WorldViewport3D: React.FC<WorldViewport3DProps> = ({
         continue;
       }
 
-      if (ent.customAssetId) {
+      const resolvedCustomAssetId =
+        ent.customAssetId ?? (isSavePlinthEntity(ent) ? project.savePlinthAssetId : undefined);
+
+      if (resolvedCustomAssetId) {
         const anchor = new THREE.Group();
         anchor.userData.entityId = ent.id;
         anchor.position.set(wx, wy + extraY + (ent.elevationY ?? 0), wz);
-        const isCached = Boolean(getCachedAssetSync(ent.customAssetId));
+        const isCached = Boolean(getCachedAssetSync(resolvedCustomAssetId));
         if (!isCached) {
           const fallbackMesh = buildEntityMesh(ent);
           applyVisualStyleToObject(fallbackMesh, style);
           fallbackMesh.userData.entityId = ent.id;
+          fallbackMesh.traverse((child) => {
+            if (child.userData?.floatSpin) {
+              refs.floatSpinObjects.push(child);
+            }
+          });
           anchor.add(fallbackMesh);
+        }
+        if (isSavePlinthEntity(ent) && savePlinthAddedLight < 6) {
+          savePlinthAddedLight++;
+          const plinthPt = new THREE.PointLight('#38BDF8', 4.0, 9.5, 1.8);
+          plinthPt.position.set(0, 1.75, 0);
+          anchor.add(plinthPt);
         }
         refs.entitiesContainer.add(anchor);
         refs.entityGroups.set(ent.id, anchor);
-        deferredCustomEntities.push({ ent, anchor, isCached });
+        deferredCustomEntities.push({ ent, anchor, customAssetId: resolvedCustomAssetId, isCached });
         continue;
       }
 
@@ -2774,6 +2796,11 @@ export const WorldViewport3D: React.FC<WorldViewport3DProps> = ({
         const pt = new THREE.PointLight('#FF9C40', 4.5, 11, 1.8);
         pt.position.set(0, 1.82, 0.38);
         mesh.add(pt);
+      } else if (isSavePlinthEntity(ent) && savePlinthAddedLight < 6) {
+        savePlinthAddedLight++;
+        const plinthPt = new THREE.PointLight('#38BDF8', 4.0, 9.5, 1.8);
+        plinthPt.position.set(0, 1.75, 0);
+        mesh.add(plinthPt);
       }
       refs.entitiesContainer.add(mesh);
       refs.entityGroups.set(ent.id, mesh);
@@ -2899,10 +2926,10 @@ export const WorldViewport3D: React.FC<WorldViewport3DProps> = ({
           void refs.precompileObject(refs.entitiesContainer);
         }
 
-        const attachCustomEntity = (ent: LevelEntity, anchor: THREE.Group) => {
-          if (signal.aborted || !ent.customAssetId) return;
-          const meta = customAssets.find((a) => a.id === ent.customAssetId);
-          const inst = instantiateCustomModel(ent.customAssetId, meta, {
+        const attachCustomEntity = (ent: LevelEntity, anchor: THREE.Group, customAssetId: string) => {
+          if (signal.aborted || !customAssetId) return;
+          const meta = customAssets.find((a) => a.id === customAssetId);
+          const inst = instantiateCustomModel(customAssetId, meta, {
             scaleAdjust: ent.modelScaleAdjust ?? 1,
             offsetY: ent.modelOffsetY ?? 0,
             visualStyle: style,
@@ -2932,9 +2959,21 @@ export const WorldViewport3D: React.FC<WorldViewport3DProps> = ({
           if (latestEnt.meshletEnabled) {
             prepareObjectForMeshletCulling(inst.group, true);
           }
+          const preservedLights: THREE.PointLight[] = [];
+          for (const child of anchor.children) {
+            if (child instanceof THREE.PointLight) {
+              preservedLights.push(child);
+            }
+          }
+          for (const pt of preservedLights) {
+            anchor.remove(pt);
+          }
           disposeObject3D(anchor);
           anchor.clear();
           anchor.add(inst.group);
+          for (const pt of preservedLights) {
+            anchor.add(pt);
+          }
           refs.customUpdaters.push((stepDt) => inst.update(stepDt));
         };
 
@@ -2950,8 +2989,8 @@ export const WorldViewport3D: React.FC<WorldViewport3DProps> = ({
             yieldBeforeFirst: true,
             signal,
             onChunk: (chunk) => {
-              for (const { ent, anchor } of chunk) {
-                attachCustomEntity(ent, anchor);
+              for (const { ent, anchor, customAssetId } of chunk) {
+                attachCustomEntity(ent, anchor, customAssetId);
               }
             },
           });
@@ -2961,10 +3000,10 @@ export const WorldViewport3D: React.FC<WorldViewport3DProps> = ({
 
         if (uncachedCustom.length > 0) {
           const missingEntAssets = new Map<string, CustomAssetMeta['category']>();
-          for (const { ent } of uncachedCustom) {
-            if (ent.customAssetId && !missingEntAssets.has(ent.customAssetId)) {
-              const meta = customAssets.find((a) => a.id === ent.customAssetId);
-              missingEntAssets.set(ent.customAssetId, meta?.category ?? 'prop');
+          for (const { customAssetId } of uncachedCustom) {
+            if (customAssetId && !missingEntAssets.has(customAssetId)) {
+              const meta = customAssets.find((a) => a.id === customAssetId);
+              missingEntAssets.set(customAssetId, meta?.category ?? 'prop');
             }
           }
           await Promise.allSettled(
@@ -2978,8 +3017,8 @@ export const WorldViewport3D: React.FC<WorldViewport3DProps> = ({
             maxItemsPerFrame: 6,
             signal,
             onChunk: (chunk) => {
-              for (const { ent, anchor } of chunk) {
-                attachCustomEntity(ent, anchor);
+              for (const { ent, anchor, customAssetId } of chunk) {
+                attachCustomEntity(ent, anchor, customAssetId);
               }
             },
           });
@@ -3004,6 +3043,7 @@ export const WorldViewport3D: React.FC<WorldViewport3DProps> = ({
     project.heroCustomAssetId,
     project.heroModelScale,
     project.heroModelOffsetY,
+    project.savePlinthAssetId,
     customAssets,
     texInvalidationTick,
   ]);

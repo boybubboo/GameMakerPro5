@@ -767,7 +767,7 @@ export const EditorShell: React.FC<{ store: MakerStore }> = ({ store }) => {
           <ExportProjectZipModal store={store} onClose={() => setShowingExportZip(false)} />
         )}
 
-        <PersistentMinimapHUD store={store} />
+        {store.isPlaying && <PersistentMinimapHUD store={store} />}
       </Profiler>
 
       {store.isPlaying && (

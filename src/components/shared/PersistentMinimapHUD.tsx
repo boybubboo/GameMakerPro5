@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useId, useMemo, useState } from 'react';
 import {
   ChevronDown,
   Compass,
@@ -22,12 +22,22 @@ import {
   BuddiesLandmarks,
   DrivingWaypoints,
   getEnvironmentType,
+  getTerrainRadius,
   IslandRiver,
   IslandTerrain,
   levelBoardToWorld,
   MountainCave,
   TerrainPaths,
 } from '../../utils/terrain';
+import {
+  EXPLORE_GRID_SIZE,
+  buildSvgFogRunPath,
+  getEffectiveMapInfo,
+  getExplorationSnapshot,
+  isSavePlinthEntity,
+  requestOpenInGameWorldMap,
+  subscribeExploration,
+} from '../../utils/worldMapFog';
 
 function w2svg(wx: number, wz: number): [number, number] {
   const x = (wx / (2 * IslandTerrain.radius) + 0.5) * 100;
@@ -218,6 +228,7 @@ export const TemplateMinimapSVG: React.FC<{
   selectedEntityID?: string | null;
   interactive?: boolean;
   accentHex?: string;
+  fogRevealPath?: string | null;
   onSelectEntity?: (id: string) => void;
   onMapClick?: (pt: BoardPoint) => void;
 }> = React.memo(({
@@ -228,9 +239,11 @@ export const TemplateMinimapSVG: React.FC<{
   selectedEntityID = null,
   interactive = false,
   accentHex = '#7C5CFF',
+  fogRevealPath = null,
   onSelectEntity,
   onMapClick,
 }) => {
+  const fogMaskId = useId();
   const env = getEnvironmentType(level);
   const biome = getBiome(level.biome);
   const isBuddies = level.gameplayMode === 'buddies';
@@ -242,10 +255,14 @@ export const TemplateMinimapSVG: React.FC<{
     () => level.entities.filter((e) => e.kind === 'npc' && e.isBuddy),
     [level.entities]
   );
+  const savePlinths = useMemo(
+    () => level.entities.filter((e) => isSavePlinthEntity(e)),
+    [level.entities]
+  );
   const checkpoints = useMemo(
     () =>
       level.entities
-        .filter((e) => e.kind === 'checkpoint')
+        .filter((e) => e.kind === 'checkpoint' && !isSavePlinthEntity(e))
         .sort((a, b) => (a.checkpointOrder ?? 99) - (b.checkpointOrder ?? 99)),
     [level.entities]
   );
@@ -292,14 +309,8 @@ export const TemplateMinimapSVG: React.FC<{
     onMapClick({ x: nx, y: ny });
   };
 
-  return (
-    <svg
-      viewBox="0 0 100 100"
-      onClick={handleSvgClick}
-      className={`w-full h-full block select-none ${
-        interactive ? 'cursor-crosshair' : ''
-      }`}
-    >
+  const renderTerrainScene = () => (
+    <>
       {/* Environment Base Layer */}
       {env === 'openWorld' && (
         <>
@@ -573,6 +584,44 @@ export const TemplateMinimapSVG: React.FC<{
             strokeWidth="0.5"
           />
         ))}
+    </>
+  );
+
+  return (
+    <svg
+      viewBox="0 0 100 100"
+      onClick={handleSvgClick}
+      className={`w-full h-full block select-none ${
+        interactive ? 'cursor-crosshair' : ''
+      }`}
+    >
+      {fogRevealPath !== null ? (
+        <>
+          <defs>
+            <filter id={`${fogMaskId}-blur`}>
+              <feGaussianBlur stdDeviation="1.4" />
+            </filter>
+            <mask id={fogMaskId}>
+              <rect width="100" height="100" fill="black" />
+              {fogRevealPath && (
+                <path
+                  d={fogRevealPath}
+                  fill="white"
+                  filter={`url(#${fogMaskId}-blur)`}
+                />
+              )}
+            </mask>
+          </defs>
+          <g style={{ filter: 'grayscale(1) brightness(0.42)' }}>
+            {renderTerrainScene()}
+          </g>
+          <g mask={`url(#${fogMaskId})`}>
+            {renderTerrainScene()}
+          </g>
+        </>
+      ) : (
+        renderTerrainScene()
+      )}
 
       {/* Driving Checkpoints */}
       {isDriving &&
@@ -657,6 +706,33 @@ export const TemplateMinimapSVG: React.FC<{
           strokeWidth="0.8"
         />
       )}
+
+      {/* Save / Spawn Plinths */}
+      {savePlinths.map((sp) => {
+        const sx = sp.position.x * 100;
+        const sy = sp.position.y * 100;
+        const isSel = sp.id === selectedEntityID;
+        return (
+          <g
+            key={sp.id}
+            transform={`translate(${sx.toFixed(1)} ${sy.toFixed(1)})`}
+            onClick={(e) => {
+              if (!onSelectEntity) return;
+              e.stopPropagation();
+              onSelectEntity(sp.id);
+            }}
+            className={onSelectEntity ? 'cursor-pointer' : ''}
+          >
+            <circle cx="0" cy="0" r={isSel ? 5.2 : 4.2} fill="#38BDF8" fillOpacity="0.28" />
+            <polygon
+              points="0,-3.2 3.2,0 0,3.2 -3.2,0"
+              fill="#38BDF8"
+              stroke="#FFFFFF"
+              strokeWidth={isSel ? 1.1 : 0.75}
+            />
+          </g>
+        );
+      })}
 
       {/* Baddies, Treasures, Non-buddy NPCs */}
       {level.entities.map((ent) => {
@@ -783,6 +859,7 @@ export const PersistentMinimapHUD: React.FC<{ store: MakerStore }> = React.memo(
   );
   const [collapsed, setCollapsed] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [fogRevision, setFogRevision] = useState(0);
 
   useEffect(() => {
     setLiveTelemetry(getLivePlayerTelemetry());
@@ -792,16 +869,46 @@ export const PersistentMinimapHUD: React.FC<{ store: MakerStore }> = React.memo(
     });
   }, [collapsed]);
 
-  if (!currentProject || !currentLevel) return null;
-  if (isPlaying && playModalOpen) return null;
+  useEffect(() => {
+    if (!currentProject?.id || collapsed) return;
+    setFogRevision(getExplorationSnapshot(currentProject.id).revision);
+    return subscribeExploration((pid) => {
+      if (pid === currentProject.id) {
+        setFogRevision(getExplorationSnapshot(currentProject.id).revision);
+      }
+    });
+  }, [currentProject?.id, collapsed]);
 
   const resolvedTelemetry = liveTelemetry ?? playerTelemetry;
   const activeTelemetry =
-    resolvedTelemetry && resolvedTelemetry.levelId === currentLevel.id ? resolvedTelemetry : null;
+    currentLevel && resolvedTelemetry && resolvedTelemetry.levelId === currentLevel.id
+      ? resolvedTelemetry
+      : null;
   const displayLevel =
     isPlaying && activeTelemetry?.roguelikeFloorLevel
       ? activeTelemetry.roguelikeFloorLevel
       : currentLevel;
+
+  const fogRevealPath = useMemo(() => {
+    if (!currentProject || !displayLevel || !isPlaying || !currentProject.worldMapFogOfWar) {
+      return null;
+    }
+    const snap = getExplorationSnapshot(currentProject.id);
+    const info = getEffectiveMapInfo(currentProject, displayLevel);
+    const viewR = getEnvironmentType(displayLevel) === 'openWorld'
+      ? getTerrainRadius(displayLevel.terrain)
+      : 44;
+    const mapSpan = Math.max(1, info.radius * 2);
+    const minU = (info.originX - viewR + info.radius) / mapSpan;
+    const maxU = (info.originX + viewR + info.radius) / mapSpan;
+    const minV = (info.originZ - viewR + info.radius) / mapSpan;
+    const maxV = (info.originZ + viewR + info.radius) / mapSpan;
+    return buildSvgFogRunPath(snap.data, EXPLORE_GRID_SIZE, minU, maxU, minV, maxV);
+  }, [isPlaying, currentProject, displayLevel, fogRevision]);
+
+  if (!currentProject || !currentLevel || !displayLevel || !isPlaying || playModalOpen) {
+    return null;
+  }
 
   const env = getEnvironmentType(displayLevel);
 
@@ -914,11 +1021,26 @@ export const PersistentMinimapHUD: React.FC<{ store: MakerStore }> = React.memo(
       {/* Map Canvas */}
       <div className="p-2 flex flex-col gap-1.5">
         <div
-          className="rounded-xl overflow-hidden border border-white/15 bg-[#0B2239] shadow-inner mx-auto"
+          onClick={isPlaying ? () => requestOpenInGameWorldMap() : undefined}
+          role={isPlaying ? 'button' : undefined}
+          tabIndex={isPlaying ? 0 : undefined}
+          onKeyDown={
+            isPlaying
+              ? (e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    requestOpenInGameWorldMap();
+                  }
+                }
+              : undefined
+          }
+          className={`rounded-xl overflow-hidden border border-white/15 bg-[#0B2239] shadow-inner mx-auto ${
+            isPlaying ? 'cursor-pointer hover:border-[#38BDF8]/70 transition-colors' : ''
+          }`}
           style={{ width: mapBoxSize, height: mapBoxSize }}
           title={
             isPlaying
-              ? `${displayLevel.name} live tracker`
+              ? 'Touch or press M to open World Map'
               : 'Click anywhere on the minimap to move the player pin'
           }
         >
@@ -929,6 +1051,7 @@ export const PersistentMinimapHUD: React.FC<{ store: MakerStore }> = React.memo(
             telemetry={activeTelemetry}
             selectedEntityID={!isPlaying ? store.selectedEntityID : null}
             interactive={!isPlaying}
+            fogRevealPath={fogRevealPath}
             onSelectEntity={
               !isPlaying ? (id) => store.setSelectedEntityID(id) : undefined
             }
@@ -958,7 +1081,7 @@ export const PersistentMinimapHUD: React.FC<{ store: MakerStore }> = React.memo(
         <div className="space-y-0.5 px-0.5">
           <div className="text-[11px] font-bold text-white truncate">{zone}</div>
           <div className="flex items-center justify-between gap-1 text-[10px] font-semibold text-white/70">
-            <span className="truncate">{status}</span>
+            <span className="truncate">{isPlaying ? 'Touch map or M · World Map' : status}</span>
             <span className="tabular-nums shrink-0 text-white/50">
               {Math.round(playerPoint.x * 100)},{Math.round(playerPoint.y * 100)}
             </span>

@@ -71,6 +71,7 @@ import {
   computePartWorldMatrix,
   createDefaultMaterialFinish,
   createDefaultPartSpec,
+  createSavePlinthObjectDoc,
   createStarterObjectDoc,
   sanitizeObjectNodeName,
 } from '../../three/objectMakerBuilder';
@@ -262,12 +263,20 @@ function ensureUniquePartAndGroupNames(doc: ObjectMakerDoc): ObjectMakerDoc {
   };
 }
 
-function buildDocFromBuiltinTemplate(template: BuiltinMechanismTemplate): {
+function buildDocFromBuiltinTemplate(template: BuiltinMechanismTemplate | 'savePlinth'): {
   name: string;
   category: AssetCategory;
   doc: ObjectMakerDoc;
   mechanisms: ObjectMechanism[];
 } {
+  if (template === 'savePlinth') {
+    return {
+      name: 'Save / Spawn Plinth',
+      category: 'prop',
+      doc: createSavePlinthObjectDoc(),
+      mechanisms: [],
+    };
+  }
   if (template === 'treasureChest') {
     const baseGroupId = uid();
     const lidGroupId = uid();
@@ -2946,9 +2955,33 @@ export const ObjectMakerModal: React.FC<ObjectMakerModalProps> = ({
 
                     <div className="pt-2 border-t border-slate-200/80 dark:border-white/[0.08]">
                       <div className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 dark:text-[#949BB0] px-1 mb-1">
-                        Editable Mechanical Templates
+                        Editable Mechanical &amp; Prop Starters
                       </div>
                       <div className="space-y-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const built = buildDocFromBuiltinTemplate('savePlinth');
+                            setEditingAssetId(null);
+                            setExternalGlbMode(false);
+                            setObjectName(built.name);
+                            setAssetCategory(built.category);
+                            setDoc(built.doc);
+                            setMechanisms([]);
+                            setSelectedPartIds([built.doc.parts[0]?.id].filter(Boolean));
+                            setActiveMechanismId(null);
+                            setSelectedMechNodePath(null);
+                            setInspectorTab('material');
+                            setShowLoadMenu(false);
+                            flashToast(`Loaded editable starter "${built.name}"`);
+                          }}
+                          className="w-full px-2.5 py-1.5 rounded-xl text-left hover:bg-slate-100 dark:hover:bg-[#252B3B]"
+                        >
+                          <div className="text-xs font-bold text-[#38BDF8]">Save / Spawn Plinth</div>
+                          <div className="text-[10px] text-slate-500 dark:text-[#949BB0] truncate">
+                            Blue-glowing stone waystone with floating crystal
+                          </div>
+                        </button>
                         {BUILTIN_MECHANISM_TEMPLATES.map((tpl) => (
                           <button
                             key={tpl.id}
@@ -4063,6 +4096,75 @@ export const ObjectMakerModal: React.FC<ObjectMakerModalProps> = ({
                             }}
                             className="w-full accent-[#7C5CFF]"
                           />
+                        </div>
+
+                        <div className="space-y-1.5 pt-1.5 border-t border-slate-200/60 dark:border-white/[0.06]">
+                          <label className="flex items-center justify-between text-xs font-semibold">
+                            <span>Glow / Emissive Color</span>
+                            <div className="flex items-center gap-1.5">
+                              {primaryPart?.material.emissive && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    updateSelectedParts((p) => ({
+                                      ...p,
+                                      material: {
+                                        ...p.material,
+                                        emissive: undefined,
+                                        emissiveIntensity: 0,
+                                      },
+                                    }))
+                                  }
+                                  className="text-[10px] font-bold text-slate-400 hover:text-slate-600 dark:hover:text-white"
+                                >
+                                  Clear
+                                </button>
+                              )}
+                              <input
+                                type="color"
+                                value={primaryPart?.material.emissive || '#38BDF8'}
+                                onChange={(e) => {
+                                  const hex = e.target.value;
+                                  updateSelectedParts((p) => ({
+                                    ...p,
+                                    material: {
+                                      ...p.material,
+                                      emissive: hex,
+                                      emissiveIntensity: p.material.emissiveIntensity || 1.25,
+                                    },
+                                  }));
+                                }}
+                                className="w-9 h-6 rounded cursor-pointer border-0 bg-transparent"
+                              />
+                            </div>
+                          </label>
+                          <div className="space-y-0.5">
+                            <div className="flex items-center justify-between text-[11px] font-semibold">
+                              <span>Glow Strength</span>
+                              <span className="font-mono">
+                                {(primaryPart?.material.emissiveIntensity ?? 0).toFixed(2)}
+                              </span>
+                            </div>
+                            <input
+                              type="range"
+                              min={0}
+                              max={2.5}
+                              step={0.05}
+                              value={primaryPart?.material.emissiveIntensity ?? 0}
+                              onChange={(e) => {
+                                const val = Number(e.target.value);
+                                updateSelectedParts((p) => ({
+                                  ...p,
+                                  material: {
+                                    ...p.material,
+                                    emissive: val > 0 ? (p.material.emissive || '#38BDF8') : undefined,
+                                    emissiveIntensity: val,
+                                  },
+                                }));
+                              }}
+                              className="w-full accent-[#38BDF8]"
+                            />
+                          </div>
                         </div>
                       </div>
 
